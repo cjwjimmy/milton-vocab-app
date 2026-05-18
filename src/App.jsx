@@ -54,16 +54,20 @@ function speak(text) {
   window.speechSynthesis.speak(utterance);
 }
 
+const LOGOS = {
+  horizontalBlue: '/brand/milton-horizontal-blue.png',
+  iconYellow: '/brand/milton-icon-yellow.png',
+};
+
 function Logo({ small = false, yellow = false }) {
+  const src = small || yellow ? LOGOS.iconYellow : LOGOS.horizontalBlue;
   return (
-    <div className={small ? 'logo logo-small' : 'logo'} style={{ color: yellow ? BRAND.secondary : BRAND.primary }}>
-      <div className="deer">♞</div>
-      {!small && (
-        <div>
-          <div className="logo-title">Milton</div>
-          <div className="logo-subtitle">Kids Academy</div>
-        </div>
-      )}
+    <div className={small ? 'logo logo-small' : 'logo'}>
+      <img
+        src={src}
+        alt={small || yellow ? 'Milton yellow icon logo' : 'Milton Kids Academy logo'}
+        className={small ? 'logo-img logo-img-small' : 'logo-img'}
+      />
     </div>
   );
 }
