@@ -354,3 +354,24 @@ textarea { resize: vertical; }
   padding: 10px 14px;
   white-space: nowrap;
 }
+
+.record-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.record-filter-grid label {
+  display: grid;
+  gap: 6px;
+  color: #2f4878;
+  font-weight: 900;
+}
+.record-filter-grid select {
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .record-filter-grid {
+    grid-template-columns: 1fr;
+  }
+}

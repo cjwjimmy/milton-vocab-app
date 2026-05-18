@@ -117,59 +117,43 @@ function getUnitNumberFromText(value) {
   return match ? match[0].replace(/unit/i, 'Unit') : text || 'Unit';
 }
 
-function transformAssignmentRuns(runRows) {
-  const grouped = new Map();
+function formatRunStatus(status) {
+  if (status === 'completed') return '已完成';
+  if (status === 'in_progress') return '練習中';
+  return status || '練習中';
+}
 
-  (runRows || []).forEach((run) => {
+function transformAssignmentRuns(runRows) {
+  return (runRows || []).map((run) => {
     const assignment = run.assignments || {};
     const student = run.students || {};
+    const unit = assignment.vocab_units || {};
     const classId = assignment.class_id || student.class_id || '';
-    const key = `${run.assignment_id || assignment.id}-${run.student_id || student.id}`;
-    const completedAt = run.completed_at || run.started_at || '';
-    const existing = grouped.get(key);
+    const rawTime = run.completed_at || run.started_at || '';
 
-    if (!existing) {
-      grouped.set(key, {
-        id: key,
-        runId: run.id,
-        assignmentId: run.assignment_id || assignment.id || '',
-        classId,
-        studentName: student.name || '學生',
-        assignmentName: assignment.title || '回家複習',
-        unitName: getUnitNumberFromText(assignment.vocab_units?.unit_name || assignment.vocab_units?.title || 'Unit'),
-        unitTitle: getUnitNumberFromText(assignment.vocab_units?.unit_name || assignment.vocab_units?.title || 'Unit'),
-        score: run.score || 0,
-        latestScore: run.score || 0,
-        attempts: 1,
-        completedWords: run.completed_words || 0,
-        totalWords: run.total_words || 0,
-        wrongCount: run.wrong_count || 0,
-        status: run.status === 'completed' ? '已完成' : run.status === 'in_progress' ? '練習中' : run.status || '練習中',
-        completedAt: completedAt ? completedAt.replace('T', ' ').slice(0, 16) : '',
-        rawCompletedAt: completedAt,
-      });
-      return;
-    }
-
-    const isNewer = completedAt && (!existing.rawCompletedAt || completedAt > existing.rawCompletedAt);
-    existing.attempts += 1;
-    existing.score = Math.max(existing.score, run.score || 0);
-    if (isNewer) {
-      existing.runId = run.id;
-      existing.assignmentId = run.assignment_id || assignment.id || existing.assignmentId;
-      existing.unitName = getUnitNumberFromText(assignment.vocab_units?.unit_name || existing.unitName || existing.unitTitle);
-      existing.unitTitle = getUnitNumberFromText(assignment.vocab_units?.unit_name || existing.unitTitle);
-      existing.latestScore = run.score || 0;
-      existing.status = run.status === 'completed' ? '已完成' : run.status === 'in_progress' ? '練習中' : run.status || existing.status;
-      existing.completedWords = run.completed_words || existing.completedWords;
-      existing.totalWords = run.total_words || existing.totalWords;
-      existing.wrongCount = run.wrong_count || 0;
-      existing.completedAt = completedAt.replace('T', ' ').slice(0, 16);
-      existing.rawCompletedAt = completedAt;
-    }
-  });
-
-  return Array.from(grouped.values()).sort((a, b) => String(b.rawCompletedAt || '').localeCompare(String(a.rawCompletedAt || '')));
+    return {
+      id: run.id,
+      runId: run.id,
+      assignmentId: run.assignment_id || assignment.id || '',
+      studentId: run.student_id || student.id || '',
+      classId,
+      studentName: student.name || '學生',
+      assignmentName: assignment.title || '回家複習',
+      unitId: assignment.unit_id || unit.id || '',
+      bookLevel: unit.book_level || getUnitNumberFromText(assignment.title || ''),
+      unitName: getUnitNumberFromText(unit.unit_name || assignment.title || 'Unit'),
+      unitTitle: unit.title || assignment.title || 'Unit',
+      score: run.score || 0,
+      latestScore: run.score || 0,
+      attempts: 1,
+      completedWords: run.completed_words || 0,
+      totalWords: run.total_words || 0,
+      wrongCount: run.wrong_count || 0,
+      status: formatRunStatus(run.status),
+      completedAt: rawTime ? rawTime.replace('T', ' ').slice(0, 16) : '',
+      rawCompletedAt: rawTime,
+    };
+  }).sort((a, b) => String(b.rawCompletedAt || '').localeCompare(String(a.rawCompletedAt || '')));
 }
 
 export default function App() {
@@ -209,6 +193,11 @@ export default function App() {
   const [currentRunId, setCurrentRunId] = React.useState('');
   const [totalWrongCount, setTotalWrongCount] = React.useState(0);
   const [recordsMessage, setRecordsMessage] = React.useState('老師後台紀錄會從 Supabase 讀取。');
+  const [recordClassFilter, setRecordClassFilter] = React.useState('');
+  const [recordStudentFilter, setRecordStudentFilter] = React.useState('');
+  const [recordBookLevelFilter, setRecordBookLevelFilter] = React.useState('');
+  const [recordUnitFilter, setRecordUnitFilter] = React.useState('');
+  const [recordStatusFilter, setRecordStatusFilter] = React.useState('all');
   const [assignmentName, setAssignmentName] = React.useState('Level 4 Unit 1 The Great Outdoors 回家複習');
   const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來指派回家作業。');
   const [assignmentLink, setAssignmentLink] = React.useState('');
@@ -241,7 +230,7 @@ export default function App() {
         .order('created_at', { ascending: false }),
       supabase
         .from('assignment_runs')
-        .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title, unit_name)), students(id, name, class_id)')
+        .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(id, title, unit_name, book_level)), students(id, name, class_id)')
         .order('started_at', { ascending: false }),
     ]);
 
@@ -904,12 +893,31 @@ export default function App() {
     setSpeechMessage('點擊喇叭播放英文單字');
   }
 
+  React.useEffect(() => {
+    if (!recordClassFilter && selectedClass?.id) setRecordClassFilter(selectedClass.id);
+  }, [selectedClass?.id, recordClassFilter]);
+
+  React.useEffect(() => {
+    setRecordStudentFilter('');
+    setRecordUnitFilter('');
+  }, [recordClassFilter, recordBookLevelFilter]);
+
   const completedCount = completedWordIds.length;
   const remainingCount = Math.max(0, wordOrder.length - completedCount);
   const canMoveNext = showResult && !isUnitComplete && currentIndex + 1 < wordOrder.length;
-  const visibleAssignmentRecords = assignmentRecords.filter((record) => record.classId === selectedClass.id);
-  const currentStudentRecord = visibleAssignmentRecords.find(
-    (record) => record.studentName === studentName && (record.unitName === selectedLevel.unit || record.unitTitle === selectedLevel.unit || record.unitTitle === selectedLevel.title)
+  const recordSelectedClassId = recordClassFilter || selectedClass.id;
+  const recordStudents = classes.find((classItem) => classItem.id === recordSelectedClassId)?.students || [];
+  const recordUnitOptions = levels.filter((level) => !recordBookLevelFilter || level.bookLevel === recordBookLevelFilter);
+  const visibleAssignmentRecords = assignmentRecords.filter((record) => {
+    if (recordSelectedClassId && record.classId !== recordSelectedClassId) return false;
+    if (recordStudentFilter && record.studentName !== recordStudentFilter && record.studentId !== recordStudentFilter) return false;
+    if (recordBookLevelFilter && record.bookLevel !== recordBookLevelFilter) return false;
+    if (recordUnitFilter && record.unitId !== recordUnitFilter && record.unitName !== recordUnitFilter) return false;
+    if (recordStatusFilter !== 'all' && record.status !== recordStatusFilter) return false;
+    return true;
+  });
+  const currentStudentRecord = assignmentRecords.find(
+    (record) => record.classId === studentClass.id && record.studentName === studentName && (record.unitId === selectedLevel.id || record.unitName === selectedLevel.unit || record.unitTitle === selectedLevel.unit || record.unitTitle === selectedLevel.title)
   );
   const studentCompletedWords = currentStudentRecord?.completedWords ?? completedWordIds.length;
   const studentTotalWords = currentStudentRecord?.totalWords ?? wordOrder.length;
@@ -1149,7 +1157,41 @@ export default function App() {
 
           {(appMode === 'teacher' && teacherUnlocked) && (
           <aside className="side-column">
-            <Card><div className="card-body"><h2>{selectedClass.name} 老師後台紀錄</h2><div className="notice">{recordsMessage}</div><div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>學生紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div><div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前這個班級還沒有作業紀錄。</div>}{visibleAssignmentRecords.map((record) => {
+            <Card><div className="card-body"><h2>老師後台紀錄</h2><div className="notice">{recordsMessage}</div>
+              <div className="record-filter-grid">
+                <label>班級
+                  <select value={recordSelectedClassId} onChange={(e) => setRecordClassFilter(e.target.value)}>
+                    {classes.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
+                  </select>
+                </label>
+                <label>學生
+                  <select value={recordStudentFilter} onChange={(e) => setRecordStudentFilter(e.target.value)}>
+                    <option value="">全部學生</option>
+                    {recordStudents.map((student) => <option key={student.id} value={student.name}>{student.name}</option>)}
+                  </select>
+                </label>
+                <label>Level
+                  <select value={recordBookLevelFilter} onChange={(e) => setRecordBookLevelFilter(e.target.value)}>
+                    <option value="">全部 Level</option>
+                    {bookLevels.map((level) => <option key={level} value={level}>{level}</option>)}
+                  </select>
+                </label>
+                <label>Unit
+                  <select value={recordUnitFilter} onChange={(e) => setRecordUnitFilter(e.target.value)}>
+                    <option value="">全部 Unit</option>
+                    {recordUnitOptions.map((level) => <option key={level.id} value={level.id}>{level.bookLevel}｜{level.unit}｜{level.title}</option>)}
+                  </select>
+                </label>
+                <label>狀態
+                  <select value={recordStatusFilter} onChange={(e) => setRecordStatusFilter(e.target.value)}>
+                    <option value="all">全部狀態</option>
+                    <option value="練習中">練習中</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
+              </div>
+              <div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>符合條件紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div>
+              <div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前沒有符合篩選條件的作業紀錄。</div>}{visibleAssignmentRecords.map((record) => {
   const progressPercent = record.totalWords ? Math.round((record.completedWords / record.totalWords) * 100) : 0;
   const statusClass = record.status === '已完成' ? 'status-complete' : 'status-progress';
   return (
@@ -1162,14 +1204,15 @@ export default function App() {
         <b>{record.score} 分</b>
         <small>答對 +10｜答錯 -5</small>
       </div>
-      <span className="record-unit">練習 Unit：{record.unitName || record.unitTitle}</span>
+      <span className="record-unit">作業：{record.bookLevel}｜{record.unitName}｜{record.unitTitle}</span>
+      <span className="record-unit">班級：{classes.find((classItem) => classItem.id === record.classId)?.name || selectedClass.name}</span>
       <div className="record-progress-line">
         <span>Unit 進度：{record.completedWords}/{record.totalWords} 題</span>
         <span>{progressPercent}%</span>
       </div>
       <div className="mini-progress"><i style={{ width: `${progressPercent}%` }} /></div>
-      <small>練習次數：{record.attempts}｜最近分數：{record.latestScore ?? record.score}｜錯誤：{record.wrongCount ?? 0}</small>
-      <small>{record.status === '已完成' ? '最近完成' : '最近練習'}：{record.completedAt || '尚未完成'}</small>
+      <small>本次分數：{record.score}｜錯誤：{record.wrongCount ?? 0}</small>
+      <small>{record.status === '已完成' ? '完成時間' : '最近練習'}：{record.completedAt || '尚未完成'}</small>
     </div>
   );
 })}</div></div></Card>
