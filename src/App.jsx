@@ -1,14 +1,18 @@
 import React from 'react';
+import { supabase, isSupabaseReady } from './lib/supabaseClient.js';
+import './styles.css';
 
 const BRAND = {
   primary: '#476CB5',
   secondary: '#FCD983',
   accent: '#2F4878',
-  cream: '#FFF9ED',
-  softBlue: '#EEF4FF',
-  headerLogo: '/brand/milton-horizontal-blue.png',
-  iconLogoYellow: '/brand/milton-icon-yellow.png',
 };
+
+const FALLBACK_CLASSES = [
+  { id: 'class-a1', name: 'A1 班', students: ['Mia', 'Andy', 'Leo', 'Nina'] },
+  { id: 'class-a2', name: 'A2 班', students: ['Emma', 'Ryan', 'Sandy', 'Ben'] },
+  { id: 'class-b1', name: 'B1 班', students: ['Kevin', 'Ruby', 'Alice', 'Jason'] },
+];
 
 const SAMPLE_IMPORT_TEXT = `Level,Unit,Word,中文,Category
 Level 4,Unit 1,a bat,球棒,Outdoor / Sports Gear
@@ -123,59 +127,42 @@ Level 4,Unit 8,play the piano,彈鋼琴,Chores / Hobbies
 Level 4,Unit 8,surf the Internet,上網,Chores / Hobbies
 Level 4,Unit 8,watch DVDs,看 DVD,Chores / Hobbies`;
 
-const INITIAL_CLASSES = [
-  { id: 'class-a1', name: 'A1 班', students: ['Mia', 'Andy', 'Leo', 'Nina'] },
-  { id: 'class-a2', name: 'A2 班', students: ['Emma', 'Ryan', 'Sandy', 'Ben'] },
-  { id: 'class-b1', name: 'B1 班', students: ['Kevin', 'Ruby', 'Alice', 'Jason'] },
-];
-
-const INITIAL_RECORDS = [
-  { id: 'r1', classId: 'class-a1', studentName: 'Mia', assignmentName: 'Level 4 Unit 1 回家複習', unitTitle: 'Level 4 Unit 1', score: 980, attempts: 3, completedWords: 16, totalWords: 16, completedAt: '2026-05-14 18:30' },
-  { id: 'r2', classId: 'class-a1', studentName: 'Andy', assignmentName: 'Level 4 Unit 1 回家複習', unitTitle: 'Level 4 Unit 1', score: 910, attempts: 2, completedWords: 16, totalWords: 16, completedAt: '2026-05-14 19:05' },
-  { id: 'r3', classId: 'class-a2', studentName: 'Emma', assignmentName: 'Level 4 Unit 2 回家複習', unitTitle: 'Level 4 Unit 2', score: 870, attempts: 1, completedWords: 12, totalWords: 12, completedAt: '2026-05-14 17:40' },
-];
-
-function normalize(value) {
-  return String(value || '').trim().toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, ' ');
-}
-
-function acceptedAnswers(word) {
-  const answer = normalize(word);
-  const list = [answer];
-  if (answer.startsWith('a ')) list.push(answer.slice(2));
-  if (answer.startsWith('an ')) list.push(answer.slice(3));
-  if (answer.startsWith('the ')) list.push(answer.slice(4));
-  return [...new Set(list)];
-}
-
 function splitCsvLine(line) {
   const cells = [];
   let current = '';
   let quoted = false;
   for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"') quoted = !quoted;
-    else if (ch === ',' && !quoted) {
+    const char = line[i];
+    if (char === '"') quoted = !quoted;
+    else if (char === ',' && !quoted) {
       cells.push(current.trim());
       current = '';
-    } else current += ch;
+    } else current += char;
   }
   cells.push(current.trim());
   return cells;
 }
 
-function parseWords(text) {
+function normalizeAnswer(value) {
+  return String(value || '').trim().toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, ' ');
+}
+
+function buildAcceptedAnswers(word) {
+  return [normalizeAnswer(word)];
+}
+
+function parseWordImport(text) {
   const rows = String(text || '').replace(/\r/g, '').split('\n').map((row) => row.trim()).filter(Boolean);
   const dataRows = rows[0]?.toLowerCase().includes('level') ? rows.slice(1) : rows;
-  const groups = new Map();
+  const grouped = new Map();
   dataRows.forEach((row, index) => {
     const [bookLevel = 'Custom', unit = 'Unit', word = '', chinese = '', category = 'Custom'] = splitCsvLine(row);
     if (!word) return;
     const key = `${bookLevel}__${unit}`;
-    if (!groups.has(key)) groups.set(key, { bookLevel, unit, words: [] });
-    groups.get(key).words.push({ id: `${key}-${index}`, bookLevel, unit, word, chinese, category, acceptedAnswers: acceptedAnswers(word) });
+    if (!grouped.has(key)) grouped.set(key, { bookLevel, unit, words: [] });
+    grouped.get(key).words.push({ id: `${key}-${index}`, bookLevel, unit, word, chinese, category, acceptedAnswers: buildAcceptedAnswers(word) });
   });
-  return [...groups.values()].map((group) => ({
+  return Array.from(grouped.values()).map((group) => ({
     id: `${group.bookLevel}-${group.unit}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     bookLevel: group.bookLevel,
     unit: group.unit,
@@ -184,7 +171,7 @@ function parseWords(text) {
   }));
 }
 
-function shuffle(items) {
+function shuffleArray(items) {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -193,131 +180,223 @@ function shuffle(items) {
   return copy;
 }
 
-function spellingFeedback(answer, correct) {
-  const typed = normalize(answer);
-  const target = normalize(correct);
-  return Array.from({ length: target.length }).map((_, i) => ({
-    index: i,
-    typedChar: typed[i] || '_',
-    ok: typed[i] === target[i],
+function getSpellingFeedback(studentAnswer, correctAnswer) {
+  const typed = normalizeAnswer(studentAnswer);
+  const target = normalizeAnswer(correctAnswer);
+  return Array.from({ length: Math.max(typed.length, target.length) }).map((_, index) => ({
+    index,
+    typedChar: typed[index] || '',
+    targetChar: target[index] || '',
+    status: typed[index] === target[index] ? 'correct' : 'wrong',
   }));
 }
 
-function firstWrongPosition(feedback) {
-  const first = feedback.find((item) => !item.ok);
-  return first ? first.index + 1 : null;
+function hasCorrectAnswerLength(studentAnswer, correctAnswer) {
+  return normalizeAnswer(studentAnswer).length === normalizeAnswer(correctAnswer).length;
 }
 
-function speak(text, mode) {
-  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'en-US';
-  utterance.rate = mode === 'slow' ? 0.72 : 0.92;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utterance);
-  return true;
+function getFirstWrongPosition(feedback) {
+  const firstWrong = feedback.find((item) => item.status !== 'correct');
+  return firstWrong ? firstWrong.index + 1 : null;
 }
 
-function nowText() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-}
-
-function createHomeworkPath(classId, levelId) {
+function homeworkPath(classId, levelId) {
   return `/homework/${encodeURIComponent(classId)}/${encodeURIComponent(levelId)}`;
 }
 
 function Logo({ compact = false, yellow = false }) {
-  return (
-    <img
-      className={compact ? 'brand-logo compact' : 'brand-logo'}
-      src={compact || yellow ? BRAND.iconLogoYellow : BRAND.headerLogo}
-      alt="Milton Kids Academy"
-    />
-  );
+  if (compact) {
+    return <img className="brand-icon" src={yellow ? '/brand/milton-icon-yellow.png' : '/brand/milton-icon-yellow.png'} alt="Milton icon" />;
+  }
+  return <img className="brand-logo" src="/brand/milton-horizontal-blue.png" alt="Milton Kids Academy" />;
 }
 
-function Panel({ children, className = '' }) {
-  return <section className={`panel ${className}`}>{children}</section>;
+function Card({ children, className = '' }) {
+  return <section className={`card ${className}`}>{children}</section>;
+}
+
+function Button({ children, className = '', ...props }) {
+  return <button className={`btn ${className}`} {...props}>{children}</button>;
 }
 
 export default function App() {
-  const [levels, setLevels] = React.useState(() => parseWords(SAMPLE_IMPORT_TEXT));
-  const [classes, setClasses] = React.useState(INITIAL_CLASSES);
-  const [records, setRecords] = React.useState(INITIAL_RECORDS);
-  const [selectedBookLevel, setSelectedBookLevel] = React.useState('Level 4');
-  const levelOptions = React.useMemo(() => [...new Set(levels.map((level) => level.bookLevel))], [levels]);
-  const unitOptions = React.useMemo(() => levels.filter((level) => level.bookLevel === selectedBookLevel), [levels, selectedBookLevel]);
-  const [selectedLevelId, setSelectedLevelId] = React.useState('level-4-unit-1');
-  const selectedLevel = levels.find((level) => level.id === selectedLevelId) || unitOptions[0] || levels[0];
-  const [wordOrder, setWordOrder] = React.useState(() => shuffle(selectedLevel.words));
-  const [currentIndex, setCurrentIndex] = React.useState(0);
-  const [answer, setAnswer] = React.useState('');
-  const [feedback, setFeedback] = React.useState(null);
-  const [hint, setHint] = React.useState('先聽一次發音，再把英文單字拼出來。');
-  const [score, setScore] = React.useState(0);
-  const [streak, setStreak] = React.useState(0);
-  const [wrongCount, setWrongCount] = React.useState(0);
-  const [completedIds, setCompletedIds] = React.useState([]);
-  const [showCorrect, setShowCorrect] = React.useState(false);
-  const [unitComplete, setUnitComplete] = React.useState(false);
-  const [voiceMode, setVoiceMode] = React.useState('slow');
-  const [speechMessage, setSpeechMessage] = React.useState('點擊喇叭播放英文單字');
-  const [selectedClassId, setSelectedClassId] = React.useState(INITIAL_CLASSES[0].id);
-  const [manageClassId, setManageClassId] = React.useState(INITIAL_CLASSES[0].id);
-  const [studentClassId, setStudentClassId] = React.useState(INITIAL_CLASSES[0].id);
-  const [studentName, setStudentName] = React.useState('');
-  const [loggedIn, setLoggedIn] = React.useState(false);
+  const [levels, setLevels] = React.useState(() => parseWordImport(SAMPLE_IMPORT_TEXT));
+  const [classes, setClasses] = React.useState(FALLBACK_CLASSES);
+  const [loadingClasses, setLoadingClasses] = React.useState(true);
+  const [dataMode, setDataMode] = React.useState(isSupabaseReady ? '正在連接 Supabase...' : '未設定 Supabase，使用本機測試資料');
+  const [message, setMessage] = React.useState('班級與學生名單已開始串接 Supabase。');
   const [newClassName, setNewClassName] = React.useState('');
   const [newStudentName, setNewStudentName] = React.useState('');
-  const [classMessage, setClassMessage] = React.useState('老師可以新增班級，也可以在班級底下新增學生姓名。');
+  const [manageClassId, setManageClassId] = React.useState(FALLBACK_CLASSES[0].id);
+  const [selectedClassId, setSelectedClassId] = React.useState(FALLBACK_CLASSES[0].id);
+  const [studentClassId, setStudentClassId] = React.useState(FALLBACK_CLASSES[0].id);
+  const [studentName, setStudentName] = React.useState('');
+  const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+  const [selectedBookLevel, setSelectedBookLevel] = React.useState('Level 4');
+  const [selectedLevelId, setSelectedLevelId] = React.useState('level-4-unit-1');
   const [assignmentName, setAssignmentName] = React.useState('Level 4 Unit 1 回家複習');
-  const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來建立回家作業。');
   const [assignmentLink, setAssignmentLink] = React.useState('');
   const [assignmentShareText, setAssignmentShareText] = React.useState('');
-  const [showImport, setShowImport] = React.useState(false);
-  const [importText, setImportText] = React.useState(SAMPLE_IMPORT_TEXT);
+  const [records, setRecords] = React.useState([]);
+  const [voiceMode, setVoiceMode] = React.useState('slow');
+  const [answer, setAnswer] = React.useState('');
+  const [wrongCount, setWrongCount] = React.useState(0);
+  const [wrongReview, setWrongReview] = React.useState(null);
+  const [score, setScore] = React.useState(0);
+  const [streak, setStreak] = React.useState(0);
+  const [hint, setHint] = React.useState('先聽一次發音，再把英文單字拼出來。');
+  const [speechMessage, setSpeechMessage] = React.useState('點擊喇叭播放英文單字');
+  const unitOptions = React.useMemo(() => levels.filter((level) => level.bookLevel === selectedBookLevel), [levels, selectedBookLevel]);
+  const selectedLevel = levels.find((level) => level.id === selectedLevelId) || unitOptions[0] || levels[0];
+  const [wordOrder, setWordOrder] = React.useState(() => shuffleArray(selectedLevel.words));
+  const [currentIndex, setCurrentIndex] = React.useState(0);
+  const [completedWordIds, setCompletedWordIds] = React.useState([]);
+  const [showResult, setShowResult] = React.useState(false);
+  const [isUnitComplete, setIsUnitComplete] = React.useState(false);
   const inputRef = React.useRef(null);
-
   const currentWord = wordOrder[currentIndex] || selectedLevel.words[0];
   const selectedClass = classes.find((item) => item.id === selectedClassId) || classes[0];
   const manageClass = classes.find((item) => item.id === manageClassId) || classes[0];
   const studentClass = classes.find((item) => item.id === studentClassId) || classes[0];
+  const completedCount = completedWordIds.length;
+  const remainingCount = Math.max(0, wordOrder.length - completedCount);
   const classRecords = records.filter((record) => record.classId === selectedClassId);
-  const averageScore = classRecords.length ? Math.round(classRecords.reduce((sum, record) => sum + record.score, 0) / classRecords.length) : 0;
-  const leaderboard = classRecords.length
-    ? [...classRecords].sort((a, b) => b.score - a.score).slice(0, 6)
-    : selectedClass.students.map((name, i) => ({ id: name, studentName: name, score: Math.max(0, 800 - i * 80), unitTitle: selectedLevel.title }));
+
+  async function loadClassesFromSupabase() {
+    if (!supabase) {
+      setLoadingClasses(false);
+      return;
+    }
+    setLoadingClasses(true);
+    const { data, error } = await supabase
+      .from('classes')
+      .select('id, name, students(id, name)')
+      .order('created_at', { ascending: true })
+      .order('created_at', { foreignTable: 'students', ascending: true });
+
+    if (error) {
+      setDataMode(`Supabase 讀取失敗：${error.message}`);
+      setLoadingClasses(false);
+      return;
+    }
+
+    const mapped = (data || []).map((item) => ({
+      id: item.id,
+      name: item.name,
+      students: (item.students || []).map((student) => student.name),
+      studentRows: item.students || [],
+    }));
+
+    if (mapped.length) {
+      setClasses(mapped);
+      const firstId = mapped[0].id;
+      setManageClassId((old) => mapped.some((c) => c.id === old) ? old : firstId);
+      setSelectedClassId((old) => mapped.some((c) => c.id === old) ? old : firstId);
+      setStudentClassId((old) => mapped.some((c) => c.id === old) ? old : firstId);
+      setDataMode('已連接 Supabase，班級與學生會永久保存');
+    } else {
+      setDataMode('Supabase 目前沒有班級，請先新增班級');
+      setClasses([]);
+    }
+    setLoadingClasses(false);
+  }
+
+  React.useEffect(() => {
+    loadClassesFromSupabase();
+  }, []);
 
   React.useEffect(() => {
     const next = levels.find((level) => level.id === selectedLevelId) || levels[0];
-    setWordOrder(shuffle(next.words));
+    setWordOrder(shuffleArray(next.words));
     setCurrentIndex(0);
     setAnswer('');
-    setFeedback(null);
-    setShowCorrect(false);
-    setUnitComplete(false);
-    setCompletedIds([]);
+    setWrongReview(null);
+    setWrongCount(0);
     setScore(0);
     setStreak(0);
-    setWrongCount(0);
-    setSpeechMessage('點擊喇叭播放英文單字');
-    setHint('已重新整理此 Unit 任務。每次任務都會完成 Unit 所有單字。');
+    setCompletedWordIds([]);
+    setShowResult(false);
+    setIsUnitComplete(false);
   }, [selectedLevelId, levels]);
 
-  function resetCurrentRun() {
-    setWordOrder(shuffle(selectedLevel.words));
-    setCurrentIndex(0);
-    setAnswer('');
-    setFeedback(null);
-    setShowCorrect(false);
-    setUnitComplete(false);
-    setCompletedIds([]);
-    setScore(0);
-    setStreak(0);
-    setWrongCount(0);
-    setHint('已重新開始完整 Unit 任務。');
-    setSpeechMessage('點擊喇叭播放英文單字');
+  async function addClass() {
+    const name = newClassName.trim();
+    if (!name) return setMessage('請先輸入班級名稱。');
+    if (classes.some((item) => item.name === name)) return setMessage('這個班級已經存在。');
+
+    if (supabase) {
+      const { data, error } = await supabase.from('classes').insert({ name }).select('id, name').single();
+      if (error) return setMessage(`新增班級失敗：${error.message}`);
+      setNewClassName('');
+      setMessage(`✅ 已新增班級：${data.name}`);
+      await loadClassesFromSupabase();
+      setManageClassId(data.id);
+      setSelectedClassId(data.id);
+      setStudentClassId(data.id);
+      return;
+    }
+
+    const nextClass = { id: `class-${Date.now()}`, name, students: [] };
+    setClasses((prev) => [...prev, nextClass]);
+    setNewClassName('');
+    setMessage(`✅ 已新增班級：${name}`);
+  }
+
+  async function deleteManagedClass() {
+    if (!manageClass) return;
+    if (classes.length <= 1) return setMessage('至少需要保留一個班級，不能刪除最後一個班級。');
+
+    if (supabase) {
+      const { error } = await supabase.from('classes').delete().eq('id', manageClass.id);
+      if (error) return setMessage(`刪除班級失敗：${error.message}`);
+      setMessage(`已刪除班級：${manageClass.name}`);
+      await loadClassesFromSupabase();
+      return;
+    }
+
+    const next = classes.filter((item) => item.id !== manageClass.id);
+    setClasses(next);
+    setManageClassId(next[0].id);
+    setSelectedClassId(next[0].id);
+    setStudentClassId(next[0].id);
+  }
+
+  async function addStudent() {
+    const name = newStudentName.trim();
+    if (!name) return setMessage('請先輸入學生姓名。');
+    if (!manageClass) return setMessage('請先選擇班級。');
+    if (manageClass.students.includes(name)) return setMessage('這位學生已在此班級。');
+
+    if (supabase) {
+      const { error } = await supabase.from('students').insert({ class_id: manageClass.id, name });
+      if (error) return setMessage(`新增學生失敗：${error.message}`);
+      setNewStudentName('');
+      setMessage(`✅ 已將 ${name} 加入 ${manageClass.name}`);
+      await loadClassesFromSupabase();
+      return;
+    }
+
+    setClasses((prev) => prev.map((item) => item.id === manageClass.id ? { ...item, students: [...item.students, name] } : item));
+    setNewStudentName('');
+  }
+
+  async function removeStudent(studentNameToRemove) {
+    if (!manageClass) return;
+    if (supabase) {
+      const studentRow = manageClass.studentRows?.find((student) => student.name === studentNameToRemove);
+      const query = supabase.from('students').delete().eq('class_id', manageClass.id).eq('name', studentNameToRemove);
+      const { error } = studentRow ? await supabase.from('students').delete().eq('id', studentRow.id) : await query;
+      if (error) return setMessage(`刪除學生失敗：${error.message}`);
+      setMessage(`已從 ${manageClass.name} 移除 ${studentNameToRemove}`);
+      if (studentName === studentNameToRemove) {
+        setStudentName('');
+        setIsLoggedIn(false);
+      }
+      await loadClassesFromSupabase();
+      return;
+    }
+
+    setClasses((prev) => prev.map((item) => item.id === manageClass.id ? { ...item, students: item.students.filter((student) => student !== studentNameToRemove) } : item));
   }
 
   function changeBookLevel(levelName) {
@@ -329,304 +408,218 @@ export default function App() {
     }
   }
 
-  function applyImportedWords() {
-    const parsed = parseWords(importText);
-    if (!parsed.length) {
-      setHint('匯入失敗：請確認有 Level, Unit, Word 欄位。');
-      return;
-    }
-    setLevels(parsed);
-    setSelectedBookLevel(parsed[0].bookLevel);
-    setSelectedLevelId(parsed[0].id);
-    setAssignmentName(`${parsed[0].title} 回家複習`);
-    setHint('已匯入新的單字庫。');
-  }
-
-  function addClass() {
-    const name = newClassName.trim();
-    if (!name) return setClassMessage('請先輸入班級名稱。');
-    if (classes.some((item) => item.name === name)) return setClassMessage('這個班級已經存在。');
-    const newClass = { id: `class-${Date.now()}`, name, students: [] };
-    setClasses((prev) => [...prev, newClass]);
-    setManageClassId(newClass.id);
-    setSelectedClassId(newClass.id);
-    setStudentClassId(newClass.id);
-    setNewClassName('');
-    setStudentName('');
-    setLoggedIn(false);
-    setClassMessage(`✅ 已新增班級：${name}`);
-  }
-
-  function deleteManagedClass() {
-    if (classes.length <= 1) return setClassMessage('至少需要保留一個班級，不能刪除最後一個班級。');
-    const target = manageClass;
-    const next = classes.filter((item) => item.id !== target.id);
-    const fallback = next[0];
-    setClasses(next);
-    setRecords((prev) => prev.filter((record) => record.classId !== target.id));
-    setManageClassId(fallback.id);
-    if (selectedClassId === target.id) setSelectedClassId(fallback.id);
-    if (studentClassId === target.id) {
-      setStudentClassId(fallback.id);
-      setStudentName('');
-      setLoggedIn(false);
-    }
-    setClassMessage(`已刪除班級：${target.name}。`);
-  }
-
-  function addStudent() {
-    const name = newStudentName.trim();
-    if (!name) return setClassMessage('請先輸入學生姓名。');
-    if (manageClass.students.includes(name)) return setClassMessage('這位學生已經在此班級中。');
-    setClasses((prev) => prev.map((item) => item.id === manageClass.id ? { ...item, students: [...item.students, name] } : item));
-    setNewStudentName('');
-    setStudentClassId(manageClass.id);
-    setClassMessage(`✅ 已將 ${name} 加入 ${manageClass.name}`);
-  }
-
-  function removeStudent(name) {
-    setClasses((prev) => prev.map((item) => item.id === manageClass.id ? { ...item, students: item.students.filter((student) => student !== name) } : item));
-    if (studentName === name) {
-      setStudentName('');
-      setLoggedIn(false);
-    }
-    setClassMessage(`已從 ${manageClass.name} 移除 ${name}。`);
-  }
-
-  function createAssignment() {
-    const path = createHomeworkPath(selectedClass.id, selectedLevel.id);
-    const origin = window.location?.origin || 'https://milton-vocab-app.vercel.app';
-    const link = `${origin}${path}`;
-    const shareText = `${selectedClass.name} ${selectedLevel.title} 回家聽力拼字作業\n請完成 Unit 所有單字：\n${link}`;
+  function createHomeworkAssignment() {
+    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://milton-vocab-app.vercel.app';
+    const link = `${origin}${homeworkPath(selectedClass?.id || 'class', selectedLevel.id)}`;
     setAssignmentLink(link);
-    setAssignmentShareText(shareText);
-    setAssignmentMessage(`✅ 已建立作業：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.title}`);
+    setAssignmentShareText(`${selectedClass?.name || '班級'} ${selectedLevel.title} 回家聽力拼字作業\n請完成 Unit 所有單字：\n${link}`);
+    setMessage(`✅ 已建立作業連結：${assignmentName}`);
   }
 
-  function playAudio() {
-    if (!loggedIn) {
-      setHint('請先登入學生姓名，才能播放聽力。');
-      return;
-    }
-    const ok = speak(currentWord.word, voiceMode);
-    setSpeechMessage(ok ? '正在播放聽力，請仔細聽...' : '此瀏覽器不支援語音播放。');
-    setTimeout(() => inputRef.current?.focus(), 150);
+  function speakWord() {
+    if (!isLoggedIn) return setHint('請先登入學生姓名，才能播放聽力。');
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return setSpeechMessage('此瀏覽器不支援語音播放。');
+    const utterance = new window.SpeechSynthesisUtterance(currentWord.word);
+    utterance.lang = 'en-US';
+    utterance.rate = voiceMode === 'slow' ? 0.72 : 0.92;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setSpeechMessage('正在播放聽力，請仔細聽...');
+    setTimeout(() => inputRef.current?.focus(), 160);
   }
 
-  function recordCompletion(finalScore) {
-    if (!studentName || !loggedIn) return;
-    const recordId = `${studentClassId}-${studentName}-${selectedLevel.id}`;
-    setRecords((prev) => {
-      const found = prev.find((record) => record.id === recordId);
-      if (found) {
-        return prev.map((record) => record.id === recordId ? {
-          ...record,
-          score: Math.max(record.score, finalScore),
-          latestScore: finalScore,
-          attempts: record.attempts + 1,
-          completedWords: wordOrder.length,
-          totalWords: wordOrder.length,
-          completedAt: nowText(),
-        } : record);
-      }
-      return [{ id: recordId, classId: studentClassId, studentName, assignmentName, unitTitle: selectedLevel.title, score: finalScore, latestScore: finalScore, attempts: 1, completedWords: wordOrder.length, totalWords: wordOrder.length, completedAt: nowText() }, ...prev];
-    });
-  }
-
-  function submitAnswer(event) {
+  function checkAnswer(event) {
     event.preventDefault();
-    if (!loggedIn) return setHint('請先登入學生姓名，才能送出答案。');
-    const typed = normalize(answer);
-    const target = normalize(currentWord.word);
-    if (!typed) return setHint('請先輸入你聽到的英文單字。');
-    if (typed.length !== target.length) {
-      setFeedback(null);
-      setHint(`字數還不正確，這個答案需要 ${target.length} 個字元，目前是 ${typed.length} 個字元。請修正字數後再送出。`);
-      return setTimeout(() => inputRef.current?.focus(), 100);
-    }
-    if (currentWord.acceptedAnswers.includes(typed)) {
-      const gained = Math.max(40, 100 - wrongCount * 20);
-      const finalScore = score + gained;
-      const nextCompleted = completedIds.includes(currentWord.id) ? completedIds : [...completedIds, currentWord.id];
-      setScore(finalScore);
-      setStreak((value) => value + 1);
-      setFeedback(null);
-      setShowCorrect(true);
-      setCompletedIds(nextCompleted);
-      setHint(nextCompleted.length >= wordOrder.length ? '🎉 太棒了！你已完成這個 Unit 的所有單字！' : '太棒了！請繼續下一題，完成整個 Unit。');
-      if (nextCompleted.length >= wordOrder.length) {
-        setUnitComplete(true);
-        recordCompletion(finalScore);
-      }
+    if (!isLoggedIn) return setHint('請先登入學生姓名，才能送出答案。');
+    const normalized = normalizeAnswer(answer);
+    if (!normalized) return setHint('請先輸入你聽到的英文單字。');
+    if (!hasCorrectAnswerLength(answer, currentWord.word)) {
+      setWrongReview(null);
+      setHint(`字數還不正確，答案需要 ${normalizeAnswer(currentWord.word).length} 個字元，目前是 ${normalized.length} 個。`);
       return;
     }
-    const nextFeedback = spellingFeedback(answer, currentWord.word);
-    const firstWrong = firstWrongPosition(nextFeedback);
-    setWrongCount((value) => value + 1);
+    if (currentWord.acceptedAnswers.includes(normalized)) {
+      const point = Math.max(40, 100 - wrongCount * 20);
+      const nextScore = score + point;
+      setScore(nextScore);
+      setStreak((prev) => prev + 1);
+      setWrongReview(null);
+      setShowResult(true);
+      setCompletedWordIds((prev) => {
+        const next = prev.includes(currentWord.id) ? prev : [...prev, currentWord.id];
+        if (next.length >= wordOrder.length) {
+          const now = new Date();
+          setIsUnitComplete(true);
+          setRecords((old) => [{
+            id: `${studentClassId}-${studentName}-${Date.now()}`,
+            classId: studentClassId,
+            className: studentClass?.name || '',
+            studentName,
+            assignmentName,
+            unitTitle: selectedLevel.title,
+            score: nextScore,
+            attempts: 1,
+            completedWords: wordOrder.length,
+            totalWords: wordOrder.length,
+            completedAt: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+          }, ...old]);
+          setHint('🎉 已完成整個 Unit！目前成績先顯示在前端，下一階段會寫入 Supabase。');
+        } else {
+          setHint('太棒了！請繼續下一題。');
+        }
+        return next;
+      });
+      return;
+    }
+    const feedback = getSpellingFeedback(answer, currentWord.word);
+    const firstWrongPosition = getFirstWrongPosition(feedback);
+    setWrongCount((prev) => prev + 1);
     setStreak(0);
-    setFeedback(nextFeedback);
+    setWrongReview({ submittedAnswer: answer, feedback });
     setAnswer('');
-    setHint(firstWrong ? `第 ${firstWrong} 個位置需要再檢查。請重新聽一次，然後再拼同一個單字。` : '請重新聽一次，然後再拼同一個單字。');
-    setTimeout(() => inputRef.current?.focus(), 100);
+    setHint(`第 ${firstWrongPosition || 1} 個位置需要再檢查，請重新聽一次並拼同一題。`);
   }
 
   function nextQuestion() {
     setAnswer('');
-    setFeedback(null);
-    setShowCorrect(false);
+    setWrongReview(null);
     setWrongCount(0);
-    setSpeechMessage('點擊喇叭播放英文單字');
+    setShowResult(false);
     setHint('先聽一次發音，再把英文單字拼出來。');
-    setCurrentIndex((value) => Math.min(value + 1, wordOrder.length - 1));
+    setSpeechMessage('點擊喇叭播放英文單字');
+    if (currentIndex + 1 < wordOrder.length) setCurrentIndex((prev) => prev + 1);
+    else setIsUnitComplete(true);
   }
 
-  const completedCount = completedIds.length;
-  const remainingCount = Math.max(0, wordOrder.length - completedCount);
-  const maskedWord = currentWord.word.split('').map((ch) => [' ', '-', "'"].includes(ch) ? ch : '_');
+  function restartUnit() {
+    setWordOrder(shuffleArray(selectedLevel.words));
+    setCurrentIndex(0);
+    setCompletedWordIds([]);
+    setAnswer('');
+    setWrongReview(null);
+    setWrongCount(0);
+    setScore(0);
+    setStreak(0);
+    setShowResult(false);
+    setIsUnitComplete(false);
+    setHint('已重新開始完整 Unit 任務。');
+  }
+
+  const maskedWord = currentWord.word.split('').map((letter) => [' ', '-', "'"].includes(letter) ? letter : '_').join(' ');
 
   return (
-    <div className="page">
+    <div className="app-shell">
       <header className="hero">
         <Logo />
         <div className="hero-copy">
           <div className="pill">Milton Review Mission</div>
           <h1>Let’s Go 回家聽力拼字任務</h1>
-          <p>老師依照上課 Level 與 Unit 指派作業，學生登入姓名後完成聽力拼字練習，排行榜只顯示同班同學。</p>
+          <p>班級與學生名單已接 Supabase；後續會再接單字庫、作業與成績紀錄。</p>
+          <div className={`status ${isSupabaseReady ? 'ok' : 'warn'}`}>{loadingClasses ? '正在載入班級...' : dataMode}</div>
         </div>
       </header>
 
       <main className="layout">
-        <aside className="stack">
-          <Panel>
-            <div className="section-title-row">
-              <h2>選擇 Level / Unit</h2>
-              <button className="ghost-button small" onClick={() => setShowImport(!showImport)}>{showImport ? '收合' : '匯入'}</button>
-            </div>
+        <aside className="sidebar">
+          <Card>
+            <h2>選擇 Level / Unit</h2>
             <label>教材 Level</label>
-            <select value={selectedBookLevel} onChange={(e) => changeBookLevel(e.target.value)}>
-              {levelOptions.map((level) => <option key={level}>{level}</option>)}
+            <select value={selectedBookLevel} onChange={(event) => changeBookLevel(event.target.value)}>
+              {[...new Set(levels.map((level) => level.bookLevel))].map((level) => <option key={level}>{level}</option>)}
             </select>
             <div className="unit-list">
               {unitOptions.map((level) => (
-                <button key={level.id} className={`unit-card ${selectedLevelId === level.id ? 'active' : ''}`} onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.title} 回家複習`); }}>
+                <button key={level.id} className={selectedLevelId === level.id ? 'unit active' : 'unit'} onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.title} 回家複習`); }}>
                   <strong>{level.title}</strong>
-                  <span>完整單字庫：{level.words.length} 個單字，全部必考</span>
+                  <span>{level.words.length} 個單字，全部必考</span>
                 </button>
               ))}
             </div>
-          </Panel>
+          </Card>
 
-          {showImport && (
-            <Panel>
-              <h2>老師匯入單字</h2>
-              <textarea className="import-box" value={importText} onChange={(e) => setImportText(e.target.value)} />
-              <button className="full" onClick={applyImportedWords}>取代目前題庫</button>
-            </Panel>
-          )}
-
-          <Panel>
+          <Card>
             <h2>班級 / 學生名單管理</h2>
-            <div className="notice">先選擇要管理的班級，再新增學生姓名到該班。</div>
+            <div className="notice">現在新增、刪除班級與學生會寫入 Supabase。</div>
             <label>選擇要管理的班級</label>
-            <select value={manageClassId} onChange={(e) => { setManageClassId(e.target.value); setNewStudentName(''); setClassMessage('已切換班級，請新增或管理此班學生。'); }}>
+            <select value={manageClassId} onChange={(event) => setManageClassId(event.target.value)} disabled={!classes.length}>
               {classes.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.students.length} 位學生）</option>)}
             </select>
-            <div className="notice">目前管理班級：<strong>{manageClass.name}</strong>｜學生數：<strong>{manageClass.students.length}</strong></div>
-            <button className="danger full" disabled={classes.length <= 1} onClick={deleteManagedClass}>刪除目前班級</button>
             <div className="form-row">
-              <input value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder="新增班級，例如：C1 班" />
-              <button onClick={addClass}>新增班級</button>
+              <input value={newClassName} onChange={(event) => setNewClassName(event.target.value)} placeholder="新增班級，例如 C1 班" />
+              <Button onClick={addClass}>新增班級</Button>
             </div>
+            <Button className="danger outline" onClick={deleteManagedClass} disabled={classes.length <= 1}>刪除目前班級</Button>
             <div className="form-row">
-              <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="新增學生姓名" />
-              <button onClick={addStudent}>加入學生</button>
+              <input value={newStudentName} onChange={(event) => setNewStudentName(event.target.value)} placeholder="新增學生姓名" />
+              <Button onClick={addStudent}>加入學生</Button>
             </div>
             <div className="student-tags">
-              {manageClass.students.length ? manageClass.students.map((name) => <button className="tag" key={name} onClick={() => removeStudent(name)}>刪除學生：{name} ✕</button>) : <span className="muted-text">這個班級目前還沒有學生。</span>}
+              {manageClass?.students?.map((student) => <button key={student} onClick={() => removeStudent(student)}>刪除學生：{student} ✕</button>)}
+              {!manageClass?.students?.length && <span className="muted">這個班級目前沒有學生。</span>}
             </div>
-            <div className="warning-box">{classMessage}</div>
-          </Panel>
+            <div className="message">{message}</div>
+          </Card>
 
-          <Panel>
+          <Card>
             <h2>建立回家作業</h2>
-            <input value={assignmentName} onChange={(e) => setAssignmentName(e.target.value)} />
-            <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)}>
+            <input value={assignmentName} onChange={(event) => setAssignmentName(event.target.value)} />
+            <select value={selectedClassId} onChange={(event) => setSelectedClassId(event.target.value)} disabled={!classes.length}>
               {classes.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.students.length} 位學生）</option>)}
             </select>
-            <div className="notice">指派範圍：<strong>{selectedLevel.title}</strong><br />指派班級：<strong>{selectedClass.name}</strong></div>
-            <button className="full" onClick={createAssignment}>建立這個 Unit 作業</button>
-            <div className="warning-box">{assignmentMessage}</div>
-            {assignmentLink && <div className="assignment-share"><strong>學生作業入口</strong><div className="link-box">{assignmentLink}</div><div className="qr-preview">{Array.from({ length: 25 }).map((_, i) => <span key={i} className={[0,1,2,5,10,6,12,18,20,21,22,24].includes(i) ? 'dark' : ''} />)}</div><textarea readOnly value={assignmentShareText} /></div>}
-          </Panel>
+            <div className="notice">指派範圍：<strong>{selectedLevel.title}</strong><br />指派班級：<strong>{selectedClass?.name}</strong></div>
+            <Button onClick={createHomeworkAssignment}>建立這個 Unit 作業</Button>
+            {assignmentLink && <div className="share-box"><strong>學生作業入口</strong><div>{assignmentLink}</div><textarea readOnly value={assignmentShareText} /></div>}
+          </Card>
         </aside>
 
-        <section className="stack main-game">
-          <Panel>
+        <section className="game-area">
+          <Card>
             <h2>學生登入作業</h2>
             <div className="login-grid">
-              <select value={studentClassId} onChange={(e) => { setStudentClassId(e.target.value); setStudentName(''); setLoggedIn(false); }}>
+              <select value={studentClassId} onChange={(event) => { setStudentClassId(event.target.value); setStudentName(''); setIsLoggedIn(false); }} disabled={!classes.length}>
                 {classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
-              <select value={studentName} onChange={(e) => { setStudentName(e.target.value); setLoggedIn(false); }}>
+              <select value={studentName} onChange={(event) => { setStudentName(event.target.value); setIsLoggedIn(false); }} disabled={!studentClass?.students?.length}>
                 <option value="">請選擇姓名</option>
-                {studentClass.students.map((name) => <option key={name}>{name}</option>)}
+                {studentClass?.students?.map((name) => <option key={name}>{name}</option>)}
               </select>
-              <button onClick={() => { if (studentName) { setLoggedIn(true); setSelectedClassId(studentClassId); setHint(`歡迎 ${studentName}！請先聽一次發音。`); } }}>{loggedIn ? '已登入' : '登入開始作業'}</button>
+              <Button onClick={() => { if (studentName) { setIsLoggedIn(true); setSelectedClassId(studentClassId); setHint(`歡迎 ${studentName}！請先聽一次發音。`); } }}>{isLoggedIn ? '已登入' : '登入開始作業'}</Button>
             </div>
-          </Panel>
+          </Card>
 
-          <section className="game-card">
-            <div className="game-head">
+          <Card className="game-card">
+            <div className="game-header">
               <div><span>目前練習題庫</span><h2>{selectedLevel.title}</h2><p>本次任務需要完成 Unit 所有單字</p></div>
-              <div className="score-board"><strong>{score}</strong><span>分數</span></div>
-              <div className="score-board"><strong>{streak}</strong><span>連勝</span></div>
-              <div className="score-board"><strong>{wrongCount}</strong><span>錯誤</span></div>
+              <div className="score-grid"><strong>{score}</strong><span>分數</span><strong>{streak}</strong><span>連勝</span><strong>{wrongCount}</strong><span>錯誤</span></div>
             </div>
-            <div className="game-body">
-              <div className="progress-row"><span>學習進度</span><span>第 {currentIndex + 1} 題 / 共 {wordOrder.length} 題｜已完成 {completedCount} 題｜剩餘 {remainingCount} 題</span></div>
-              <div className="progress-bar"><span style={{ width: `${(completedCount / wordOrder.length) * 100}%` }} /></div>
-
-              <div className="listen-box">
-                <Logo compact yellow />
-                <h2>先聽，再拼字</h2>
-                <p>畫面不會顯示答案，請仔細聽發音。</p>
-                <button className="sound" disabled={!loggedIn} onClick={playAudio}>🔊</button>
-                <p className="speech-message">{speechMessage}</p>
-                <div className="voice-row"><button className={voiceMode === 'slow' ? 'active' : ''} onClick={() => setVoiceMode('slow')}>慢速清楚</button><button className={voiceMode === 'native' ? 'active' : ''} onClick={() => setVoiceMode('native')}>自然語速</button></div>
+            <div className="progress-label">第 {currentIndex + 1} 題 / 共 {wordOrder.length} 題｜已完成 {completedCount} 題｜剩餘 {remainingCount} 題</div>
+            <div className="progress"><div style={{ width: `${(completedCount / wordOrder.length) * 100}%` }} /></div>
+            <div className="listen-panel">
+              <Logo compact yellow />
+              <h3>先聽，再拼字</h3>
+              <p>畫面不會顯示答案，請仔細聽發音。</p>
+              <button disabled={!isLoggedIn} className="speaker" onClick={speakWord}>🔊</button>
+              <p>{speechMessage}</p>
+              <div className="voice-buttons"><button onClick={() => setVoiceMode('slow')} className={voiceMode === 'slow' ? 'active' : ''}>慢速清楚</button><button onClick={() => setVoiceMode('native')} className={voiceMode === 'native' ? 'active' : ''}>自然語速</button></div>
+            </div>
+            <form onSubmit={checkAnswer} className="answer-box">
+              <label>✏️ 請拼出你聽到的英文單字</label>
+              <input ref={inputRef} value={answer} disabled={showResult} onChange={(event) => setAnswer(event.target.value)} autoCapitalize="none" spellCheck="false" placeholder="Type the word here..." />
+              <div className="letter-hint">
+                <span>字母提示</span>
+                {wrongReview && !showResult ? <div className="letters">{wrongReview.feedback.map((item) => <b key={item.index} className={item.status === 'correct' ? 'good' : 'bad'}>{item.typedChar || '_'}</b>)}</div> : <div className="masked">{maskedWord}</div>}
               </div>
-
-              <form className="answer-form" onSubmit={submitAnswer}>
-                <label>✏️ 請拼出你聽到的英文單字</label>
-                <input ref={inputRef} value={answer} disabled={showCorrect} onChange={(e) => setAnswer(e.target.value)} autoCapitalize="none" spellCheck="false" placeholder="Type the word here..." />
-                <div className="letter-hint">
-                  <div className="muted-label">字母提示</div>
-                  {feedback ? <div className="feedback-row">{feedback.map((item) => <span key={item.index} className={item.ok ? 'letter ok' : 'letter bad'}>{item.typedChar}</span>)}</div> : <div className="masked-row">{maskedWord.map((item, i) => <span key={i}>{item}</span>)}</div>}
-                  {feedback && <div className="legend"><span className="green">綠色：正確</span><span className="red">紅色：錯誤</span></div>}
-                </div>
-                <div className="hint-box">{hint}</div>
-                <div className="action-row">{!showCorrect && <button>送出答案</button>}<button type="button" className="ghost-button" onClick={playAudio}>再聽一次</button></div>
-              </form>
-
-              {showCorrect && !unitComplete && <div className="correct-box"><h2>✅ 拼對了！</h2><p>英文單字：<strong>{currentWord.word}</strong></p><p>中文意思：{currentWord.chinese}</p><p>本次 Unit 任務進度：已完成 {completedCount} / {wordOrder.length} 題</p><button onClick={nextQuestion}>繼續下一題 ➜</button></div>}
-              {unitComplete && <div className="complete"><h2>🎉 Unit 完成！</h2><p>{studentName || '學生'} 已完成 {selectedLevel.title} 的全部 {wordOrder.length} 個單字。</p><p>本次分數：{score}｜錯誤次數：{wrongCount}｜這次作業已記錄到老師後台。</p><button onClick={resetCurrentRun}>重新開始完整 Unit 任務</button></div>}
-            </div>
-          </section>
+              <div className="hint">{hint}</div>
+              <div className="actions">{!showResult && <Button type="submit">送出答案</Button>}<Button type="button" className="outline" onClick={speakWord}>再聽一次</Button></div>
+            </form>
+            {showResult && !isUnitComplete && <div className="result success"><h3>✅ 拼對了！</h3><p>英文單字：<strong>{currentWord.word}</strong></p><p>中文意思：{currentWord.chinese}</p><Button onClick={nextQuestion}>繼續下一題 ➜</Button></div>}
+            {isUnitComplete && <div className="result complete"><h3>🎉 Unit 完成！</h3><p>{studentName || '學生'} 已完成 {selectedLevel.title} 的全部 {wordOrder.length} 個單字。</p><p>本次分數：{score}</p><Button onClick={restartUnit}>重新開始完整 Unit 任務</Button></div>}
+          </Card>
         </section>
 
-        <aside className="stack">
-          <Panel>
-            <div className="leader-title"><Logo compact /><h2>{selectedClass.name} 排行榜</h2></div>
-            {leaderboard.map((item, index) => <div className="rank-row" key={`${item.studentName}-${index}`}><span>{index === 0 ? '👑' : index + 1}</span><div><strong>{item.studentName}</strong><small>{item.unitTitle}</small></div><b>{item.score}</b></div>)}
-          </Panel>
-          <Panel>
-            <h2>老師後台作業紀錄</h2>
-            <div className="stat-grid"><div><strong>{classRecords.length}</strong><span>已完成紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div>
-            <div className="record-list">{classRecords.length ? classRecords.map((record) => <div className="record" key={record.id}><div><strong>{record.studentName}</strong><b>{record.score} 分</b></div><p>{record.assignmentName}</p><p>範圍：{record.unitTitle}</p><p>練習次數：{record.attempts} 次｜完成：{record.completedWords}/{record.totalWords}</p><small>最近完成：{record.completedAt}</small></div>) : <div className="notice">目前這個班級還沒有作業紀錄。</div>}</div>
-          </Panel>
-          <Panel>
-            <h2>內建檢查</h2>
-            <div className="check-list"><p>✅ 每次任務會完成整個 Unit</p><p>✅ 字數不正確不能送出</p><p>✅ 錯字只在字母提示區紅綠標示</p><p>✅ 不提供提示一個字母</p><p>✅ 老師可新增 / 刪除班級與學生</p></div>
-          </Panel>
+        <aside className="rightbar">
+          <Card><h2>{selectedClass?.name || '班級'} 排行榜</h2><div className="notice">排行榜成績下一階段會改成讀取 Supabase 作業紀錄。</div></Card>
+          <Card><h2>老師後台作業紀錄</h2><div className="summary"><strong>{classRecords.length}</strong><span>已完成紀錄</span></div>{classRecords.length === 0 && <p className="muted">目前這個班級還沒有作業紀錄。</p>}{classRecords.map((record) => <div className="record" key={record.id}><strong>{record.studentName}</strong><span>{record.score} 分</span><small>{record.unitTitle}｜{record.completedAt}</small></div>)}</Card>
         </aside>
       </main>
     </div>
