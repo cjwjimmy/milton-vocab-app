@@ -110,6 +110,13 @@ function transformSupabaseData(classRows, studentRows, unitRows, wordRows) {
 }
 
 
+
+function getUnitNumberFromText(value) {
+  const text = String(value || '');
+  const match = text.match(/Unit\s*\d+/i);
+  return match ? match[0].replace(/unit/i, 'Unit') : text || 'Unit';
+}
+
 function transformAssignmentRuns(runRows) {
   const grouped = new Map();
 
@@ -129,7 +136,8 @@ function transformAssignmentRuns(runRows) {
         classId,
         studentName: student.name || '學生',
         assignmentName: assignment.title || '回家複習',
-        unitTitle: assignment.vocab_units?.title || 'Unit',
+        unitName: getUnitNumberFromText(assignment.vocab_units?.unit_name || assignment.vocab_units?.title || 'Unit'),
+        unitTitle: getUnitNumberFromText(assignment.vocab_units?.unit_name || assignment.vocab_units?.title || 'Unit'),
         score: run.score || 0,
         latestScore: run.score || 0,
         attempts: 1,
@@ -149,6 +157,8 @@ function transformAssignmentRuns(runRows) {
     if (isNewer) {
       existing.runId = run.id;
       existing.assignmentId = run.assignment_id || assignment.id || existing.assignmentId;
+      existing.unitName = getUnitNumberFromText(assignment.vocab_units?.unit_name || existing.unitName || existing.unitTitle);
+      existing.unitTitle = getUnitNumberFromText(assignment.vocab_units?.unit_name || existing.unitTitle);
       existing.latestScore = run.score || 0;
       existing.status = run.status === 'completed' ? '已完成' : run.status === 'in_progress' ? '練習中' : run.status || existing.status;
       existing.completedWords = run.completed_words || existing.completedWords;
@@ -220,7 +230,7 @@ export default function App() {
       supabase.from('vocab_words').select('*').order('sort_order'),
       supabase
         .from('assignment_runs')
-        .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title)), students(id, name, class_id)')
+        .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title, unit_name)), students(id, name, class_id)')
         .order('started_at', { ascending: false }),
     ]);
 
@@ -386,7 +396,7 @@ export default function App() {
     if (!supabase) return;
     const { data, error } = await supabase
       .from('assignment_runs')
-      .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title)), students(id, name, class_id)')
+      .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title, unit_name)), students(id, name, class_id)')
       .eq('status', 'completed')
       .order('completed_at', { ascending: false });
 
@@ -733,7 +743,7 @@ export default function App() {
   const canMoveNext = showResult && !isUnitComplete && currentIndex + 1 < wordOrder.length;
   const visibleAssignmentRecords = assignmentRecords.filter((record) => record.classId === selectedClass.id);
   const currentStudentRecord = visibleAssignmentRecords.find(
-    (record) => record.studentName === studentName && record.unitTitle === selectedLevel.title
+    (record) => record.studentName === studentName && (record.unitName === selectedLevel.unit || record.unitTitle === selectedLevel.unit || record.unitTitle === selectedLevel.title)
   );
   const studentCompletedWords = currentStudentRecord?.completedWords ?? completedWordIds.length;
   const studentTotalWords = currentStudentRecord?.totalWords ?? wordOrder.length;
@@ -834,7 +844,7 @@ export default function App() {
                     <span className={studentProgressStatus === '已完成' ? 'status-pill status-complete' : studentProgressStatus === '練習中' ? 'status-pill status-progress' : 'status-pill status-idle'}>{studentProgressStatus}</span>
                   </div>
                   <div className="student-progress-grid">
-                    <div><small>練習 Unit</small><b>{selectedLevel.title}</b></div>
+                    <div><small>練習 Unit</small><b>{selectedLevel.unit}</b></div>
                     <div><small>完成進度</small><b>{studentCompletedWords}/{studentTotalWords} 題</b></div>
                     <div><small>目前分數</small><b>{score} 分</b></div>
                     <div><small>計分方式</small><b>答對 1 題 +10</b></div>
@@ -880,7 +890,7 @@ export default function App() {
         <b>{record.score} 分</b>
         <small>每答對 1 題 +10 分</small>
       </div>
-      <span className="record-unit">練習 Unit：{record.unitTitle}</span>
+      <span className="record-unit">練習 Unit：{record.unitName || record.unitTitle}</span>
       <div className="record-progress-line">
         <span>Unit 進度：{record.completedWords}/{record.totalWords} 題</span>
         <span>{progressPercent}%</span>
