@@ -137,6 +137,7 @@ function transformAssignmentRuns(runRows) {
       assignmentId: run.assignment_id || assignment.id || '',
       studentId: run.student_id || student.id || '',
       classId,
+      className: assignment.classes?.name || '',
       studentName: student.name || '學生',
       assignmentName: assignment.title || '回家複習',
       unitId: assignment.unit_id || unit.id || '',
@@ -193,7 +194,7 @@ export default function App() {
   const [currentRunId, setCurrentRunId] = React.useState('');
   const [totalWrongCount, setTotalWrongCount] = React.useState(0);
   const [recordsMessage, setRecordsMessage] = React.useState('老師後台紀錄會從 Supabase 讀取。');
-  const [recordClassFilter, setRecordClassFilter] = React.useState('');
+  const [recordClassFilter, setRecordClassFilter] = React.useState('all');
   const [recordStudentFilter, setRecordStudentFilter] = React.useState('');
   const [recordBookLevelFilter, setRecordBookLevelFilter] = React.useState('');
   const [recordUnitFilter, setRecordUnitFilter] = React.useState('');
@@ -894,10 +895,6 @@ export default function App() {
   }
 
   React.useEffect(() => {
-    if (!recordClassFilter && selectedClass?.id) setRecordClassFilter(selectedClass.id);
-  }, [selectedClass?.id, recordClassFilter]);
-
-  React.useEffect(() => {
     setRecordStudentFilter('');
     setRecordUnitFilter('');
   }, [recordClassFilter, recordBookLevelFilter]);
@@ -905,10 +902,16 @@ export default function App() {
   const completedCount = completedWordIds.length;
   const remainingCount = Math.max(0, wordOrder.length - completedCount);
   const canMoveNext = showResult && !isUnitComplete && currentIndex + 1 < wordOrder.length;
-  const recordSelectedClassId = recordClassFilter || selectedClass.id;
-  const rosterStudents = classes.find((classItem) => classItem.id === recordSelectedClassId)?.students || [];
+  const recordSelectedClassId = recordClassFilter || 'all';
+  const selectedRecordClass = classes.find((classItem) => classItem.id === recordSelectedClassId);
+  const rosterStudents = recordSelectedClassId === 'all'
+    ? classes.flatMap((classItem) => classItem.students || [])
+    : selectedRecordClass?.students || [];
   const recordStudentsFromRuns = assignmentRecords
-    .filter((record) => record.classId === recordSelectedClassId)
+    .filter((record) => {
+      if (recordSelectedClassId === 'all') return true;
+      return record.classId === recordSelectedClassId || record.className === selectedRecordClass?.name || (!record.classId && !record.className);
+    })
     .map((record) => ({ id: record.studentId || record.studentName, name: record.studentName }))
     .filter((student) => student.name);
   const recordStudents = Array.from(
@@ -916,10 +919,17 @@ export default function App() {
   ).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   const recordUnitOptions = levels.filter((level) => !recordBookLevelFilter || level.bookLevel === recordBookLevelFilter);
   const visibleAssignmentRecords = assignmentRecords.filter((record) => {
-    if (recordSelectedClassId && record.classId !== recordSelectedClassId) return false;
+    if (recordSelectedClassId !== 'all') {
+      const classMatches = record.classId === recordSelectedClassId || record.className === selectedRecordClass?.name || (!record.classId && !record.className);
+      if (!classMatches) return false;
+    }
     if (recordStudentFilter && record.studentName !== recordStudentFilter && record.studentId !== recordStudentFilter) return false;
     if (recordBookLevelFilter && record.bookLevel !== recordBookLevelFilter) return false;
-    if (recordUnitFilter && record.unitId !== recordUnitFilter && record.unitName !== recordUnitFilter) return false;
+    if (recordUnitFilter) {
+      const targetLevel = levels.find((level) => level.id === recordUnitFilter);
+      const unitMatches = record.unitId === recordUnitFilter || record.unitName === targetLevel?.unit || record.unitTitle === targetLevel?.title;
+      if (!unitMatches) return false;
+    }
     if (recordStatusFilter !== 'all' && record.status !== recordStatusFilter) return false;
     return true;
   });
@@ -1168,6 +1178,7 @@ export default function App() {
               <div className="record-filter-grid">
                 <label>班級
                   <select value={recordSelectedClassId} onChange={(e) => setRecordClassFilter(e.target.value)}>
+                    <option value="all">全部班級</option>
                     {classes.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
                   </select>
                 </label>
@@ -1197,8 +1208,9 @@ export default function App() {
                   </select>
                 </label>
               </div>
+              <div className="notice">如果看不到資料，請先選「全部班級 / 全部學生 / 全部 Level / 全部 Unit / 全部狀態」。</div>
               <div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>符合條件紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div>
-              <div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前沒有符合篩選條件的作業紀錄。請確認班級、學生、Level、Unit 或狀態篩選是否正確。</div>}{visibleAssignmentRecords.map((record) => {
+              <div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前沒有符合篩選條件的作業紀錄。建議先把班級、學生、Level、Unit、狀態都切回「全部」查看。</div>}{visibleAssignmentRecords.map((record) => {
   const progressPercent = record.totalWords ? Math.round((record.completedWords / record.totalWords) * 100) : 0;
   const statusClass = record.status === '已完成' ? 'status-complete' : 'status-progress';
   return (
@@ -1212,7 +1224,7 @@ export default function App() {
         <small>答對 +10｜答錯 -5</small>
       </div>
       <span className="record-unit">作業：{record.bookLevel}｜{record.unitName}｜{record.unitTitle}</span>
-      <span className="record-unit">班級：{classes.find((classItem) => classItem.id === record.classId)?.name || selectedClass.name}</span>
+      <span className="record-unit">班級：{record.className || classes.find((classItem) => classItem.id === record.classId)?.name || '未標示班級'}</span>
       <div className="record-progress-line">
         <span>Unit 進度：{record.completedWords}/{record.totalWords} 題</span>
         <span>{progressPercent}%</span>
