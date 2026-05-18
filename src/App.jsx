@@ -256,8 +256,8 @@ export default function App() {
     if (transformed.levels.length) setLevels(transformed.levels);
     const records = transformAssignmentRuns(runResult.data || []);
     setAssignmentRecords(records);
-    setRecordsMessage(`已從 Supabase 載入 ${records.length} 筆學生作業統計紀錄。`);
-    setDataMessage(`已從 Supabase 載入 ${transformed.classes.length} 個班級、${studentResult.data?.length || 0} 位學生、${transformed.levels.length} 個 Unit、${wordResult.data?.length || 0} 個單字。`);
+    setRecordsMessage(`已同步資料 ${records.length} 筆學生作業統計紀錄。`);
+    setDataMessage(`已同步資料 ${transformed.classes.length} 個班級、${studentResult.data?.length || 0} 位學生、${transformed.levels.length} 個 Unit、${wordResult.data?.length || 0} 個單字。`);
     setLoading(false);
   }
 
@@ -427,7 +427,7 @@ export default function App() {
 
     const records = transformAssignmentRuns(data || []);
     setAssignmentRecords(records);
-    setRecordsMessage(`已從 Supabase 載入 ${records.length} 筆學生作業統計紀錄。`);
+    setRecordsMessage(`已同步資料 ${records.length} 筆學生作業統計紀錄。`);
   }
 
   async function ensureCurrentAssignment() {
@@ -823,7 +823,6 @@ export default function App() {
           <div className="hero-copy">
             <div className="mission-pill">Milton Review Mission</div>
             <h1>Let’s Go 回家聽力拼字任務</h1>
-            <p>老師依照上課 Level 與 Unit 指派作業，學生登入姓名後完成整個 Unit 的聽力拼字練習。</p>
             <div className={`data-status ${loading ? 'loading' : ''}`}>{dataMessage}</div>
           </div>
         </header>
