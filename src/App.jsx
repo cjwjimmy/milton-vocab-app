@@ -134,7 +134,7 @@ function transformAssignmentRuns(runRows) {
         completedWords: run.completed_words || 0,
         totalWords: run.total_words || 0,
         wrongCount: run.wrong_count || 0,
-        status: run.status === 'completed' ? '已完成' : run.status || '已完成',
+        status: run.status === 'completed' ? '已完成' : run.status === 'in_progress' ? '練習中' : run.status || '練習中',
         completedAt: completedAt ? completedAt.replace('T', ' ').slice(0, 16) : '',
         rawCompletedAt: completedAt,
       });
@@ -146,6 +146,7 @@ function transformAssignmentRuns(runRows) {
     existing.score = Math.max(existing.score, run.score || 0);
     if (isNewer) {
       existing.latestScore = run.score || 0;
+      existing.status = run.status === 'completed' ? '已完成' : run.status === 'in_progress' ? '練習中' : run.status || existing.status;
       existing.completedWords = run.completed_words || existing.completedWords;
       existing.totalWords = run.total_words || existing.totalWords;
       existing.wrongCount = run.wrong_count || 0;
@@ -190,6 +191,7 @@ export default function App() {
   const [speechMessage, setSpeechMessage] = React.useState('點擊喇叭播放英文單字');
   const [assignmentRecords, setAssignmentRecords] = React.useState([]);
   const [currentAssignmentId, setCurrentAssignmentId] = React.useState('');
+  const [currentRunId, setCurrentRunId] = React.useState('');
   const [totalWrongCount, setTotalWrongCount] = React.useState(0);
   const [recordsMessage, setRecordsMessage] = React.useState('老師後台紀錄會從 Supabase 讀取。');
   const [assignmentName, setAssignmentName] = React.useState('Level 4 Unit 1 回家複習');
@@ -215,8 +217,7 @@ export default function App() {
       supabase
         .from('assignment_runs')
         .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title)), students(id, name, class_id)')
-        .eq('status', 'completed')
-        .order('completed_at', { ascending: false }),
+        .order('started_at', { ascending: false }),
     ]);
 
     const error = classResult.error || studentResult.error || unitResult.error || wordResult.error || runResult.error;
@@ -275,9 +276,10 @@ export default function App() {
 
   React.useEffect(() => {
     setCurrentAssignmentId('');
+    setCurrentRunId('');
     setAssignmentLink('');
     setAssignmentShareText('');
-  }, [selectedClassId, selectedLevelId]);
+  }, [selectedClassId, selectedLevelId, studentName]);
 
   React.useEffect(() => {
     if (!selectedLevel?.words?.length) return;
@@ -442,6 +444,91 @@ export default function App() {
     return created.id;
   }
 
+  async function ensureCurrentRun() {
+    if (!supabase) return '';
+    if (currentRunId) return currentRunId;
+
+    const selectedStudent = studentClass.students.find((student) => student.name === studentName);
+    if (!selectedStudent?.id) {
+      setRecordsMessage('建立練習紀錄失敗：找不到學生資料，請重新整理後再登入一次。');
+      return '';
+    }
+
+    const assignmentId = await ensureCurrentAssignment();
+    if (!assignmentId) return '';
+
+    const { data: run, error } = await supabase
+      .from('assignment_runs')
+      .insert({
+        assignment_id: assignmentId,
+        student_id: selectedStudent.id,
+        score: 0,
+        total_words: wordOrder.length,
+        completed_words: 0,
+        wrong_count: 0,
+        status: 'in_progress',
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      setRecordsMessage(`建立練習紀錄失敗：${error.message}`);
+      return '';
+    }
+
+    setCurrentRunId(run.id);
+    return run.id;
+  }
+
+  async function recordQuestionProgress({ nextCompletedIds, partialScore, isComplete }) {
+    if (!supabase) return;
+
+    const selectedStudent = studentClass.students.find((student) => student.name === studentName);
+    if (!selectedStudent?.id) {
+      setRecordsMessage('寫入進度失敗：找不到學生資料，請重新整理後再登入一次。');
+      return;
+    }
+
+    const runId = await ensureCurrentRun();
+    if (!runId) return;
+
+    const completedWords = nextCompletedIds.length;
+    const updatePayload = {
+      score: partialScore,
+      total_words: wordOrder.length,
+      completed_words: completedWords,
+      wrong_count: totalWrongCount,
+      status: isComplete ? 'completed' : 'in_progress',
+      completed_at: isComplete ? new Date().toISOString() : null,
+    };
+
+    const { error: updateError } = await supabase
+      .from('assignment_runs')
+      .update(updatePayload)
+      .eq('id', runId);
+
+    if (updateError) {
+      setRecordsMessage(`寫入答題進度失敗：${updateError.message}`);
+      return;
+    }
+
+    await supabase.from('word_attempts').insert({
+      run_id: runId,
+      word_id: currentWord.id,
+      submitted_answer: currentWord.word,
+      is_correct: true,
+      attempt_number: wrongCount + 1,
+    });
+
+    setRecordsMessage(
+      isComplete
+        ? `✅ 已完成 ${selectedLevel.title}，成績已寫入 Supabase。`
+        : `✅ 已記錄 ${studentName} 的進度：${completedWords}/${wordOrder.length} 題。`
+    );
+
+    await loadAssignmentRecords();
+  }
+
   async function createHomeworkAssignment() {
     const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://milton-vocab-app.vercel.app';
     const link = `${origin}/homework/${selectedClass.id}/${selectedLevel.id}`;
@@ -489,18 +576,20 @@ export default function App() {
     }
     if (currentWord.acceptedAnswers.includes(normalized)) {
       const addedScore = Math.max(40, 100 - wrongCount * 20);
-      setScore((value) => value + addedScore);
+      const partialScore = score + addedScore;
+      setScore(partialScore);
       setStreak((value) => value + 1);
       setWrongReview(null);
       setShowResult(true);
       setCompletedWordIds((previous) => {
         const nextCompleted = previous.includes(currentWord.id) ? previous : [...previous, currentWord.id];
-        if (nextCompleted.length >= wordOrder.length) {
+        const isComplete = nextCompleted.length >= wordOrder.length;
+        recordQuestionProgress({ nextCompletedIds: nextCompleted, partialScore, isComplete });
+        if (isComplete) {
           setIsUnitComplete(true);
-          recordCompletedAssignment(score + addedScore);
           setHint('🎉 太棒了！你已完成這個 Unit 的所有單字！');
         } else {
-          setHint('太棒了！拼字完全正確！請繼續下一題，完成整個 Unit。');
+          setHint(`太棒了！已記錄進度：${nextCompleted.length}/${wordOrder.length} 題，請繼續下一題。`);
         }
         return nextCompleted;
       });
@@ -583,6 +672,7 @@ export default function App() {
     setShowResult(false);
     setIsUnitComplete(false);
     setCompletedWordIds([]);
+    setCurrentRunId('');
     setHint('已重新開始完整 Unit 任務。');
     setSpeechMessage('點擊喇叭播放英文單字');
   }
