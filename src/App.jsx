@@ -906,7 +906,14 @@ export default function App() {
   const remainingCount = Math.max(0, wordOrder.length - completedCount);
   const canMoveNext = showResult && !isUnitComplete && currentIndex + 1 < wordOrder.length;
   const recordSelectedClassId = recordClassFilter || selectedClass.id;
-  const recordStudents = classes.find((classItem) => classItem.id === recordSelectedClassId)?.students || [];
+  const rosterStudents = classes.find((classItem) => classItem.id === recordSelectedClassId)?.students || [];
+  const recordStudentsFromRuns = assignmentRecords
+    .filter((record) => record.classId === recordSelectedClassId)
+    .map((record) => ({ id: record.studentId || record.studentName, name: record.studentName }))
+    .filter((student) => student.name);
+  const recordStudents = Array.from(
+    new Map([...rosterStudents, ...recordStudentsFromRuns].map((student) => [student.name, student])).values()
+  ).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   const recordUnitOptions = levels.filter((level) => !recordBookLevelFilter || level.bookLevel === recordBookLevelFilter);
   const visibleAssignmentRecords = assignmentRecords.filter((record) => {
     if (recordSelectedClassId && record.classId !== recordSelectedClassId) return false;
@@ -1191,7 +1198,7 @@ export default function App() {
                 </label>
               </div>
               <div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>符合條件紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div>
-              <div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前沒有符合篩選條件的作業紀錄。</div>}{visibleAssignmentRecords.map((record) => {
+              <div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前沒有符合篩選條件的作業紀錄。請確認班級、學生、Level、Unit 或狀態篩選是否正確。</div>}{visibleAssignmentRecords.map((record) => {
   const progressPercent = record.totalWords ? Math.round((record.completedWords / record.totalWords) * 100) : 0;
   const statusClass = record.status === '已完成' ? 'status-complete' : 'status-progress';
   return (
