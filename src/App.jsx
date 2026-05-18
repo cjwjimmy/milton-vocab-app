@@ -212,6 +212,10 @@ export default function App() {
   const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來建立回家作業。');
   const [assignmentLink, setAssignmentLink] = React.useState('');
   const [assignmentShareText, setAssignmentShareText] = React.useState('');
+  const [appMode, setAppMode] = React.useState('student');
+  const [teacherPassword, setTeacherPassword] = React.useState('');
+  const [teacherUnlocked, setTeacherUnlocked] = React.useState(false);
+  const TEACHER_PASSWORD = 'milton2026';
 
   const inputRef = React.useRef(null);
 
@@ -318,6 +322,22 @@ export default function App() {
       setSelectedLevelId(firstUnit.id);
       setAssignmentName(`${firstUnit.title} 回家複習`);
     }
+  }
+
+  function unlockTeacherMode() {
+    if (teacherPassword === TEACHER_PASSWORD) {
+      setTeacherUnlocked(true);
+      setAppMode('teacher');
+      setTeacherPassword('');
+      return;
+    }
+    alert('老師密碼不正確，請再試一次。');
+  }
+
+  function switchToStudentMode() {
+    setAppMode('student');
+    setTeacherUnlocked(false);
+    setTeacherPassword('');
   }
 
   async function addClass() {
@@ -769,7 +789,33 @@ export default function App() {
           </div>
         </header>
 
-        <main className="main-grid">
+        <section className="mode-switch-card">
+          <div>
+            <span className="mode-label">目前入口</span>
+            <h2>{appMode === 'teacher' && teacherUnlocked ? '老師後台' : '學生練習'}</h2>
+            <p>{appMode === 'teacher' && teacherUnlocked ? '管理班級、學生、作業與查看紀錄。' : '學生只會看到登入、選 Unit 與聽力拼字練習。'}</p>
+          </div>
+          <div className="mode-actions">
+            <button type="button" className={appMode === 'student' ? 'mode-button active' : 'mode-button'} onClick={switchToStudentMode}>學生入口</button>
+            {!teacherUnlocked ? (
+              <div className="teacher-login-inline">
+                <input
+                  type="password"
+                  value={teacherPassword}
+                  onChange={(e) => setTeacherPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') unlockTeacherMode(); }}
+                  placeholder="老師密碼"
+                />
+                <button type="button" className="mode-button teacher" onClick={unlockTeacherMode}>進入老師後台</button>
+              </div>
+            ) : (
+              <button type="button" className="mode-button active teacher" onClick={() => setAppMode('teacher')}>老師後台</button>
+            )}
+          </div>
+        </section>
+
+        <main className={appMode === 'teacher' && teacherUnlocked ? 'main-grid' : 'main-grid student-only'}>
+          {(appMode === 'teacher' && teacherUnlocked) && (
           <aside className="side-column">
             <Card>
               <div className="card-body">
@@ -825,7 +871,29 @@ export default function App() {
             </Card>
           </aside>
 
+          )}
+
           <section className="game-column">
+            {!(appMode === 'teacher' && teacherUnlocked) && (
+              <Card>
+                <div className="card-body">
+                  <h2>選擇練習 Level / Unit</h2>
+                  <label>教材 Level</label>
+                  <select value={selectedBookLevel} onChange={(e) => changeBookLevel(e.target.value)}>
+                    {bookLevels.map((level) => <option key={level}>{level}</option>)}
+                  </select>
+                  <div className="student-unit-picker">
+                    {unitOptions.map((level) => (
+                      <button key={level.id} type="button" onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.title} 回家複習`); }} className={`unit-button ${selectedLevel.id === level.id ? 'active' : ''}`}>
+                        <div className="unit-number-badge">{level.unit}</div>
+                        <strong>{level.title}</strong>
+                        <span>{level.words.length} 個單字，全部必考</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            )}
             <Card>
               <div className="card-body">
                 <h2>學生登入作業</h2>
@@ -877,6 +945,7 @@ export default function App() {
             </Card>
           </section>
 
+          {(appMode === 'teacher' && teacherUnlocked) && (
           <aside className="side-column">
             <Card><div className="card-body"><h2>{selectedClass.name} 老師後台紀錄</h2><div className="notice">{recordsMessage}</div><div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>學生紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div><div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前這個班級還沒有作業紀錄。</div>}{visibleAssignmentRecords.map((record) => {
   const progressPercent = record.totalWords ? Math.round((record.completedWords / record.totalWords) * 100) : 0;
@@ -903,6 +972,7 @@ export default function App() {
   );
 })}</div></div></Card>
           </aside>
+          )}
         </main>
       </div>
     </div>
