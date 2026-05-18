@@ -376,12 +376,89 @@ export default function App() {
     setClassManageMessage(`已刪除班級：${manageClass.name}`);
   }
 
-  function createHomeworkAssignment() {
+  async function loadAssignmentRecords() {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from('assignment_runs')
+      .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title)), students(id, name, class_id)')
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false });
+
+    if (error) {
+      setRecordsMessage(`讀取作業紀錄失敗：${error.message}`);
+      return;
+    }
+
+    const records = transformAssignmentRuns(data || []);
+    setAssignmentRecords(records);
+    setRecordsMessage(`已從 Supabase 載入 ${records.length} 筆學生作業統計紀錄。`);
+  }
+
+  async function ensureCurrentAssignment() {
+    if (!supabase) return '';
+    if (currentAssignmentId) return currentAssignmentId;
+    if (!selectedClass?.id || !selectedLevel?.id) {
+      setRecordsMessage('建立作業失敗：缺少班級或 Unit。');
+      return '';
+    }
+
+    const { data: existing, error: findError } = await supabase
+      .from('assignments')
+      .select('id')
+      .eq('class_id', selectedClass.id)
+      .eq('unit_id', selectedLevel.id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (findError) {
+      setRecordsMessage(`查詢作業失敗：${findError.message}`);
+      return '';
+    }
+
+    if (existing?.id) {
+      setCurrentAssignmentId(existing.id);
+      return existing.id;
+    }
+
+    const { data: created, error: createError } = await supabase
+      .from('assignments')
+      .insert({
+        class_id: selectedClass.id,
+        unit_id: selectedLevel.id,
+        title: assignmentName || `${selectedLevel.title} 回家複習`,
+        is_active: true,
+      })
+      .select('id')
+      .single();
+
+    if (createError) {
+      setRecordsMessage(`建立作業失敗：${createError.message}`);
+      return '';
+    }
+
+    setCurrentAssignmentId(created.id);
+    return created.id;
+  }
+
+  async function createHomeworkAssignment() {
     const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://milton-vocab-app.vercel.app';
     const link = `${origin}/homework/${selectedClass.id}/${selectedLevel.id}`;
     const shareText = `${selectedClass.name} ${selectedLevel.title} 回家聽力拼字作業\n請完成 Unit 所有單字：\n${link}`;
     setAssignmentLink(link);
     setAssignmentShareText(shareText);
+
+    if (supabase) {
+      const assignmentId = await ensureCurrentAssignment();
+      if (!assignmentId) {
+        setAssignmentMessage('建立作業失敗，請查看右側老師後台訊息。');
+        return;
+      }
+      setAssignmentMessage(`✅ 已建立作業並寫入 Supabase：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.title}`);
+      return;
+    }
+
     setAssignmentMessage(`✅ 已建立作業：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.title}`);
   }
 
@@ -445,9 +522,15 @@ export default function App() {
     const now = new Date();
     const completedAt = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-    if (supabase && selectedStudent?.id) {
+    if (supabase) {
+      if (!selectedStudent?.id) {
+        setRecordsMessage('寫入成績失敗：找不到這位學生的 Supabase student id，請重新整理後再登入一次。');
+        return;
+      }
+
       const assignmentId = await ensureCurrentAssignment();
       if (!assignmentId) return;
+
       const { error } = await supabase.from('assignment_runs').insert({
         assignment_id: assignmentId,
         student_id: selectedStudent.id,
