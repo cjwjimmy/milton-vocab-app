@@ -124,6 +124,8 @@ function transformAssignmentRuns(runRows) {
     if (!existing) {
       grouped.set(key, {
         id: key,
+        runId: run.id,
+        assignmentId: run.assignment_id || assignment.id || '',
         classId,
         studentName: student.name || '學生',
         assignmentName: assignment.title || '回家複習',
@@ -145,6 +147,8 @@ function transformAssignmentRuns(runRows) {
     existing.attempts += 1;
     existing.score = Math.max(existing.score, run.score || 0);
     if (isNewer) {
+      existing.runId = run.id;
+      existing.assignmentId = run.assignment_id || assignment.id || existing.assignmentId;
       existing.latestScore = run.score || 0;
       existing.status = run.status === 'completed' ? '已完成' : run.status === 'in_progress' ? '練習中' : run.status || existing.status;
       existing.completedWords = run.completed_words || existing.completedWords;
@@ -563,6 +567,53 @@ export default function App() {
     setTimeout(() => inputRef.current?.focus(), 200);
   }
 
+  async function resumeCurrentStudentProgress() {
+    if (!currentStudentRecord?.runId) {
+      setHint('目前沒有可接續的未完成紀錄。');
+      return;
+    }
+
+    if (!supabase) {
+      setHint('目前未連接 Supabase，無法接續雲端進度。');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('word_attempts')
+      .select('word_id')
+      .eq('run_id', currentStudentRecord.runId)
+      .eq('is_correct', true);
+
+    if (error) {
+      setHint(`讀取接續進度失敗：${error.message}`);
+      return;
+    }
+
+    let completedIds = [...new Set((data || []).map((row) => row.word_id).filter(Boolean))];
+
+    if (!completedIds.length && currentStudentRecord.completedWords > 0) {
+      completedIds = selectedLevel.words.slice(0, currentStudentRecord.completedWords).map((word) => word.id);
+    }
+
+    const completedWords = selectedLevel.words.filter((word) => completedIds.includes(word.id));
+    const remainingWords = shuffleArray(selectedLevel.words.filter((word) => !completedIds.includes(word.id)));
+
+    setCurrentRunId(currentStudentRecord.runId);
+    setCurrentAssignmentId(currentStudentRecord.assignmentId || '');
+    setCompletedWordIds(completedIds);
+    setWordOrder([...completedWords, ...remainingWords]);
+    setCurrentIndex(completedWords.length < selectedLevel.words.length ? completedWords.length : 0);
+    setScore(currentStudentRecord.latestScore ?? currentStudentRecord.score ?? completedIds.length * 10);
+    setTotalWrongCount(currentStudentRecord.wrongCount || 0);
+    setWrongCount(0);
+    setShowResult(false);
+    setWrongReview(null);
+    setIsUnitComplete(false);
+    setHint(`已接續 ${selectedLevel.title}：目前完成 ${completedIds.length}/${selectedLevel.words.length} 題，請繼續下一題。`);
+    setSpeechMessage('點擊喇叭播放英文單字');
+    setTimeout(() => inputRef.current?.focus(), 120);
+  }
+
   function checkAnswer(event) {
     event.preventDefault();
     if (!isLoggedIn) return setHint('請先登入學生姓名，才能送出答案。');
@@ -681,11 +732,18 @@ export default function App() {
   const remainingCount = Math.max(0, wordOrder.length - completedCount);
   const canMoveNext = showResult && !isUnitComplete && currentIndex + 1 < wordOrder.length;
   const visibleAssignmentRecords = assignmentRecords.filter((record) => record.classId === selectedClass.id);
+  const currentStudentRecord = visibleAssignmentRecords.find(
+    (record) => record.studentName === studentName && record.unitTitle === selectedLevel.title
+  );
+  const studentCompletedWords = currentStudentRecord?.completedWords ?? completedWordIds.length;
+  const studentTotalWords = currentStudentRecord?.totalWords ?? wordOrder.length;
+  const studentProgressPercent = studentTotalWords ? Math.round((studentCompletedWords / studentTotalWords) * 100) : 0;
+  const studentProgressStatus = isUnitComplete
+    ? '已完成'
+    : studentCompletedWords > 0
+      ? '練習中'
+      : '尚未開始';
   const averageScore = visibleAssignmentRecords.length ? Math.round(visibleAssignmentRecords.reduce((sum, record) => sum + record.score, 0) / visibleAssignmentRecords.length) : 0;
-  const studentAssignmentRecords = assignmentRecords.filter((record) => record.classId === studentClass.id && record.studentName === studentName);
-  const currentStudentUnitRecord = studentAssignmentRecords.find((record) => record.unitTitle === selectedLevel.title);
-  const liveProgressPercent = wordOrder.length ? Math.round((completedCount / wordOrder.length) * 100) : 0;
-  const savedProgressPercent = currentStudentUnitRecord?.totalWords ? Math.round((currentStudentUnitRecord.completedWords / currentStudentUnitRecord.totalWords) * 100) : 0;
   const maskedWord = currentWord.word.split('').map((letter) => ([" ", '-', "'"].includes(letter) ? letter : '_')).join(' ');
 
   return (
@@ -770,40 +828,24 @@ export default function App() {
                   </select>
                   <PrimaryButton onClick={() => { if (studentName) { setIsLoggedIn(true); setSelectedClassId(studentClass.id); setHint(`歡迎 ${studentName}！請先聽一次發音。`); } }}>{isLoggedIn ? '已登入' : '登入開始作業'}</PrimaryButton>
                 </div>
-
-                <div className="student-progress-card">
+                <div className="student-progress-panel">
                   <div className="student-progress-head">
-                    <div>
-                      <span>學生自己的作業紀錄</span>
-                      <strong>{studentName || '尚未選擇學生'}</strong>
-                    </div>
-                    <b>{currentStudentUnitRecord?.status || (completedCount > 0 ? '練習中' : '尚未開始')}</b>
+                    <strong>我的作業紀錄</strong>
+                    <span className={studentProgressStatus === '已完成' ? 'status-pill status-complete' : studentProgressStatus === '練習中' ? 'status-pill status-progress' : 'status-pill status-idle'}>{studentProgressStatus}</span>
                   </div>
-                  <div className="student-current-unit">
-                    <span>目前 Unit</span>
-                    <strong>{selectedLevel.title}</strong>
+                  <div className="student-progress-grid">
+                    <div><small>練習 Unit</small><b>{selectedLevel.title}</b></div>
+                    <div><small>完成進度</small><b>{studentCompletedWords}/{studentTotalWords} 題</b></div>
+                    <div><small>目前分數</small><b>{score} 分</b></div>
+                    <div><small>計分方式</small><b>答對 1 題 +10</b></div>
                   </div>
-                  <div className="student-progress-line">
-                    <span>本次練習進度：{completedCount}/{wordOrder.length} 題</span>
-                    <span>{liveProgressPercent}%</span>
-                  </div>
-                  <div className="student-progress-bar"><i style={{ width: `${liveProgressPercent}%` }} /></div>
-                  <div className="student-progress-meta">
-                    <span>目前分數：{score} 分</span>
-                    <span>每答對 1 題 +10 分</span>
-                    <span>總錯誤：{totalWrongCount}</span>
-                  </div>
-                  {studentName && currentStudentUnitRecord ? (
-                    <div className="student-saved-record">
-                      <div className="student-progress-line">
-                        <span>已儲存進度：{currentStudentUnitRecord.completedWords}/{currentStudentUnitRecord.totalWords} 題</span>
-                        <span>{savedProgressPercent}%</span>
-                      </div>
-                      <div className="student-progress-bar saved"><i style={{ width: `${savedProgressPercent}%` }} /></div>
-                      <small>練習 Unit：{currentStudentUnitRecord.unitTitle}｜紀錄分數：{currentStudentUnitRecord.score} 分｜狀態：{currentStudentUnitRecord.status}</small>
-                    </div>
-                  ) : (
-                    <small className="student-no-record">{studentName ? '這個 Unit 尚未有已儲存紀錄；答對第一題後會自動建立紀錄。' : '請先選擇姓名，這裡會顯示學生自己的 Unit 進度。'}</small>
+                  <div className="record-progress-line"><span>我的 Unit 進度</span><span>{studentProgressPercent}%</span></div>
+                  <div className="mini-progress"><i style={{ width: `${studentProgressPercent}%` }} /></div>
+                  <p className="student-progress-note">{studentName ? '每答對一題後，進度會同步到老師後台。' : '請先選擇班級與姓名，登入後即可查看自己的作業進度。'}</p>
+                  {currentStudentRecord?.status === '練習中' && currentStudentRecord?.runId && (
+                    <button type="button" className="resume-button" onClick={resumeCurrentStudentProgress}>
+                      接續上次進度
+                    </button>
                   )}
                 </div>
               </div>
