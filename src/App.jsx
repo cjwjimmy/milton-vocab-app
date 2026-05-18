@@ -213,6 +213,7 @@ export default function App() {
   const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來指派回家作業。');
   const [assignmentLink, setAssignmentLink] = React.useState('');
   const [assignmentShareText, setAssignmentShareText] = React.useState('');
+  const [deletingAssignmentId, setDeletingAssignmentId] = React.useState('');
   const [appMode, setAppMode] = React.useState('student');
   const [teacherPassword, setTeacherPassword] = React.useState('');
   const [teacherUnlocked, setTeacherUnlocked] = React.useState(false);
@@ -314,6 +315,16 @@ export default function App() {
   const studentAssignedAssignment = studentAssignedHomeworkOptions.find((item) => item.level.id === selectedLevelId)?.assignment || studentAssignedHomeworkOptions[0]?.assignment || null;
   const studentAssignedLevel = studentAssignedHomeworkOptions.find((item) => item.level.id === selectedLevelId)?.level || studentAssignedHomeworkOptions[0]?.level || null;
   const hasStudentAssignedHomework = studentAssignedHomeworkOptions.length > 0;
+  const teacherSelectedClassAssignments = React.useMemo(
+    () => activeAssignments
+      .filter((assignment) => assignment.class_id === selectedClass.id)
+      .map((assignment) => ({
+        assignment,
+        level: levels.find((level) => level.id === assignment.unit_id),
+      }))
+      .filter((item) => item.level),
+    [activeAssignments, selectedClass.id, levels]
+  );
   const currentWord = wordOrder[currentIndex] || selectedLevel.words?.[0] || FALLBACK_LEVELS[0].words[0];
 
   React.useEffect(() => {
@@ -650,6 +661,32 @@ export default function App() {
     setAssignmentMessage(`✅ 已建立作業：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.title}`);
   }
 
+  async function deleteHomeworkAssignment(assignmentId, levelTitle) {
+    if (!assignmentId) return;
+    const confirmed = typeof window === 'undefined' ? true : window.confirm(`確定要刪除這份指派作業嗎？\n${selectedClass.name}｜${levelTitle}\n\n刪除後學生端就不會再看到這份作業。`);
+    if (!confirmed) return;
+
+    setDeletingAssignmentId(assignmentId);
+
+    if (supabase) {
+      const { error } = await supabase
+        .from('assignments')
+        .update({ is_active: false })
+        .eq('id', assignmentId);
+
+      if (error) {
+        setAssignmentMessage(`刪除指派作業失敗：${error.message}`);
+        setDeletingAssignmentId('');
+        return;
+      }
+    }
+
+    setActiveAssignments((previous) => previous.filter((assignment) => assignment.id !== assignmentId));
+    if (currentAssignmentId === assignmentId) setCurrentAssignmentId('');
+    setDeletingAssignmentId('');
+    setAssignmentMessage(`已刪除指派作業：${selectedClass.name}｜${levelTitle}。學生端不會再看到這份作業。`);
+  }
+
   function speakWord(modeOverride = voiceMode) {
     if (!isLoggedIn) return setHint('請先登入學生姓名，才能播放聽力。');
     if (!(appMode === 'teacher' && teacherUnlocked) && !hasStudentAssignedHomework) return setHint('目前沒有老師指派的作業，不能開始練習。');
@@ -971,6 +1008,27 @@ export default function App() {
                 </select>
                 <div className="notice">指派範圍：<strong>{selectedLevel.bookLevel} {selectedLevel.unit}｜{selectedLevel.title}</strong><br />指派班級：<strong>{selectedClass.name}</strong><br /><small>可同時指派多個 Unit，學生只能從指定作業清單中選擇。</small></div>
                 <PrimaryButton onClick={createHomeworkAssignment}>指派這個 Unit 作業</PrimaryButton>
+                <div className="teacher-assignment-list">
+                  <strong>目前已指派作業</strong>
+                  {teacherSelectedClassAssignments.length === 0 && <div className="notice">這個班級目前沒有已指派作業。</div>}
+                  {teacherSelectedClassAssignments.map(({ assignment, level }) => (
+                    <div key={assignment.id} className="teacher-assignment-item">
+                      <div>
+                        <span className="assignment-level-chip">{level.bookLevel}｜{level.unit}</span>
+                        <b>{level.title}</b>
+                        <small>{assignment.title || `${level.title} 回家複習`}｜{level.words.length} 個單字</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="danger-button compact"
+                        disabled={deletingAssignmentId === assignment.id}
+                        onClick={() => deleteHomeworkAssignment(assignment.id, `${level.bookLevel} ${level.unit} ${level.title}`)}
+                      >
+                        {deletingAssignmentId === assignment.id ? '刪除中...' : '刪除指派'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
                 <div className="warning-box">{assignmentMessage}</div>
                 {assignmentLink && <div className="share-box"><strong>學生作業入口</strong><div className="link-box">{assignmentLink}</div><textarea readOnly value={assignmentShareText} rows={4} /></div>}
               </div>
