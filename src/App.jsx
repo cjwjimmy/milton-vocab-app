@@ -682,6 +682,10 @@ export default function App() {
   const canMoveNext = showResult && !isUnitComplete && currentIndex + 1 < wordOrder.length;
   const visibleAssignmentRecords = assignmentRecords.filter((record) => record.classId === selectedClass.id);
   const averageScore = visibleAssignmentRecords.length ? Math.round(visibleAssignmentRecords.reduce((sum, record) => sum + record.score, 0) / visibleAssignmentRecords.length) : 0;
+  const studentAssignmentRecords = assignmentRecords.filter((record) => record.classId === studentClass.id && record.studentName === studentName);
+  const currentStudentUnitRecord = studentAssignmentRecords.find((record) => record.unitTitle === selectedLevel.title);
+  const liveProgressPercent = wordOrder.length ? Math.round((completedCount / wordOrder.length) * 100) : 0;
+  const savedProgressPercent = currentStudentUnitRecord?.totalWords ? Math.round((currentStudentUnitRecord.completedWords / currentStudentUnitRecord.totalWords) * 100) : 0;
   const maskedWord = currentWord.word.split('').map((letter) => ([" ", '-', "'"].includes(letter) ? letter : '_')).join(' ');
 
   return (
@@ -765,6 +769,42 @@ export default function App() {
                     {studentClass.students.map((student) => <option key={student.id} value={student.name}>{student.name}</option>)}
                   </select>
                   <PrimaryButton onClick={() => { if (studentName) { setIsLoggedIn(true); setSelectedClassId(studentClass.id); setHint(`歡迎 ${studentName}！請先聽一次發音。`); } }}>{isLoggedIn ? '已登入' : '登入開始作業'}</PrimaryButton>
+                </div>
+
+                <div className="student-progress-card">
+                  <div className="student-progress-head">
+                    <div>
+                      <span>學生自己的作業紀錄</span>
+                      <strong>{studentName || '尚未選擇學生'}</strong>
+                    </div>
+                    <b>{currentStudentUnitRecord?.status || (completedCount > 0 ? '練習中' : '尚未開始')}</b>
+                  </div>
+                  <div className="student-current-unit">
+                    <span>目前 Unit</span>
+                    <strong>{selectedLevel.title}</strong>
+                  </div>
+                  <div className="student-progress-line">
+                    <span>本次練習進度：{completedCount}/{wordOrder.length} 題</span>
+                    <span>{liveProgressPercent}%</span>
+                  </div>
+                  <div className="student-progress-bar"><i style={{ width: `${liveProgressPercent}%` }} /></div>
+                  <div className="student-progress-meta">
+                    <span>目前分數：{score} 分</span>
+                    <span>每答對 1 題 +10 分</span>
+                    <span>總錯誤：{totalWrongCount}</span>
+                  </div>
+                  {studentName && currentStudentUnitRecord ? (
+                    <div className="student-saved-record">
+                      <div className="student-progress-line">
+                        <span>已儲存進度：{currentStudentUnitRecord.completedWords}/{currentStudentUnitRecord.totalWords} 題</span>
+                        <span>{savedProgressPercent}%</span>
+                      </div>
+                      <div className="student-progress-bar saved"><i style={{ width: `${savedProgressPercent}%` }} /></div>
+                      <small>練習 Unit：{currentStudentUnitRecord.unitTitle}｜紀錄分數：{currentStudentUnitRecord.score} 分｜狀態：{currentStudentUnitRecord.status}</small>
+                    </div>
+                  ) : (
+                    <small className="student-no-record">{studentName ? '這個 Unit 尚未有已儲存紀錄；答對第一題後會自動建立紀錄。' : '請先選擇姓名，這裡會顯示學生自己的 Unit 進度。'}</small>
+                  )}
                 </div>
               </div>
             </Card>

@@ -100,3 +100,89 @@ textarea { resize: vertical; }
 .record-progress-line { display: flex; justify-content: space-between; gap: 8px; grid-column: 1 / -1; color: #6b7280; font-size: 13px; font-weight: 800; }
 .mini-progress { grid-column: 1 / -1; height: 9px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
 .mini-progress i { display: block; height: 100%; border-radius: 999px; background: #fcd983; }
+
+.student-progress-card {
+  margin-top: 16px;
+  border: 2px solid #fcd983;
+  border-radius: 24px;
+  background: #fff9ed;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.student-progress-head,
+.student-current-unit,
+.student-progress-line,
+.student-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.student-progress-head span,
+.student-current-unit span {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 900;
+}
+.student-progress-head strong,
+.student-current-unit strong {
+  color: #2f4878;
+  font-size: 18px;
+}
+.student-progress-head b {
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.student-progress-line {
+  color: #2f4878;
+  font-size: 14px;
+  font-weight: 900;
+}
+.student-progress-bar {
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.student-progress-bar i {
+  display: block;
+  height: 100%;
+  background: #476cb5;
+  border-radius: 999px;
+}
+.student-progress-bar.saved i {
+  background: #fcd983;
+}
+.student-progress-meta {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.student-progress-meta span,
+.student-saved-record small,
+.student-no-record {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 800;
+}
+.student-saved-record {
+  display: grid;
+  gap: 8px;
+  background: white;
+  border: 1px solid #fcd983;
+  border-radius: 18px;
+  padding: 12px;
+}
+@media (max-width: 720px) {
+  .student-progress-head,
+  .student-current-unit,
+  .student-progress-line {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
