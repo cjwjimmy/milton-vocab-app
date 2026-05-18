@@ -209,7 +209,7 @@ export default function App() {
   const [currentRunId, setCurrentRunId] = React.useState('');
   const [totalWrongCount, setTotalWrongCount] = React.useState(0);
   const [recordsMessage, setRecordsMessage] = React.useState('老師後台紀錄會從 Supabase 讀取。');
-  const [assignmentName, setAssignmentName] = React.useState('Level 4 Unit 1 回家複習');
+  const [assignmentName, setAssignmentName] = React.useState('Level 4 Unit 1 The Great Outdoors 回家複習');
   const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來指派回家作業。');
   const [assignmentLink, setAssignmentLink] = React.useState('');
   const [assignmentShareText, setAssignmentShareText] = React.useState('');
@@ -341,7 +341,7 @@ export default function App() {
       const firstHomework = studentAssignedHomeworkOptions[0];
       setSelectedLevelId(firstHomework.level.id);
       setSelectedBookLevel(firstHomework.level.bookLevel);
-      setAssignmentName(firstHomework.assignment?.title || `${firstHomework.level.title} 回家複習`);
+      setAssignmentName(firstHomework.assignment?.title || `${firstHomework.level.bookLevel} ${firstHomework.level.unit} ${firstHomework.level.title} 回家複習`);
       setCurrentAssignmentId(firstHomework.assignment?.id || '');
       setCurrentRunId('');
     }
@@ -517,7 +517,7 @@ export default function App() {
       .insert({
         class_id: selectedClass.id,
         unit_id: selectedLevel.id,
-        title: assignmentName || `${selectedLevel.title} 回家複習`,
+        title: assignmentName || `${selectedLevel.bookLevel} ${selectedLevel.unit} ${selectedLevel.title} 回家複習`,
         is_active: true,
       })
       .select('id')
@@ -620,7 +620,7 @@ export default function App() {
   async function createHomeworkAssignment() {
     const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://milton-vocab-app.vercel.app';
     const link = `${origin}/homework/${selectedClass.id}/${selectedLevel.id}`;
-    const shareText = `${selectedClass.name} ${selectedLevel.title} 回家聽力拼字作業\n請完成 Unit 所有單字：\n${link}`;
+    const shareText = `${selectedClass.name} ${selectedLevel.bookLevel} ${selectedLevel.unit} ${selectedLevel.title} 回家聽力拼字作業\n請完成 Unit 所有單字：\n${link}`;
     setAssignmentLink(link);
     setAssignmentShareText(shareText);
 
@@ -641,7 +641,7 @@ export default function App() {
         .insert({
           class_id: selectedClass.id,
           unit_id: selectedLevel.id,
-          title: assignmentName || `${selectedLevel.title} 回家複習`,
+          title: assignmentName || `${selectedLevel.bookLevel} ${selectedLevel.unit} ${selectedLevel.title} 回家複習`,
           is_active: true,
         })
         .select('id, title, class_id, unit_id, is_active, created_at, vocab_units(id, title, unit_name, book_level)')
@@ -658,7 +658,7 @@ export default function App() {
       return;
     }
 
-    setAssignmentMessage(`✅ 已建立作業：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.title}`);
+    setAssignmentMessage(`✅ 已建立作業：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.bookLevel} ${selectedLevel.unit} ${selectedLevel.title}`);
   }
 
   async function deleteHomeworkAssignment(assignmentId, levelTitle) {
@@ -969,7 +969,7 @@ export default function App() {
                 </select>
                 <div className="unit-list">
                   {unitOptions.map((level) => (
-                    <button key={level.id} type="button" onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.title} 回家複習`); }} className={`unit-button ${selectedLevel.id === level.id ? 'active' : ''}`}>
+                    <button key={level.id} type="button" onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.bookLevel} ${level.unit} ${level.title} 回家複習`); }} className={`unit-button ${selectedLevel.id === level.id ? 'active' : ''}`}>
                       <div className="unit-number-badge">{level.unit}</div>
                       <strong>{level.title}</strong>
                       <span>完整單字庫：{level.words.length} 個單字，全部必考</span>
@@ -1002,6 +1002,7 @@ export default function App() {
             <Card>
               <div className="card-body stack">
                 <h2>指派回家作業</h2>
+                <label>作業名稱</label>
                 <input value={assignmentName} onChange={(e) => setAssignmentName(e.target.value)} />
                 <select value={selectedClass.id} onChange={(e) => setSelectedClassId(e.target.value)}>
                   {classes.map((c) => <option key={c.id} value={c.id}>{c.name}（{c.students.length} 位學生）</option>)}
@@ -1015,8 +1016,8 @@ export default function App() {
                     <div key={assignment.id} className="teacher-assignment-item">
                       <div>
                         <span className="assignment-level-chip">{level.bookLevel}｜{level.unit}</span>
-                        <b>{level.title}</b>
-                        <small>{assignment.title || `${level.title} 回家複習`}｜{level.words.length} 個單字</small>
+                        <b>{level.bookLevel} {level.unit}｜{level.title}</b>
+                        <small>{assignment.title || `${level.bookLevel} ${level.unit} ${level.title} 回家複習`}｜{level.words.length} 個單字</small>
                       </div>
                       <button
                         type="button"
@@ -1058,7 +1059,7 @@ export default function App() {
                     setSelectedLevelId(studentAssignedLevel.id);
                     setSelectedBookLevel(studentAssignedLevel.bookLevel);
                     setCurrentAssignmentId(studentAssignedAssignment.id);
-                    setAssignmentName(studentAssignedAssignment.title || `${studentAssignedLevel.title} 回家複習`);
+                    setAssignmentName(studentAssignedAssignment.title || `${studentAssignedLevel.bookLevel} ${studentAssignedLevel.unit} ${studentAssignedLevel.title} 回家複習`);
                     setHint(`歡迎 ${studentName}！這次指定作業是 ${studentAssignedLevel.bookLevel} ${studentAssignedLevel.unit}，請先聽一次發音。`);
                   }}>{isLoggedIn ? '已登入' : '登入開始作業'}</PrimaryButton>
                 </div>
@@ -1105,7 +1106,7 @@ export default function App() {
                                 setSelectedBookLevel(level.bookLevel);
                                 setCurrentAssignmentId(assignment.id);
                                 setCurrentRunId('');
-                                setAssignmentName(assignment.title || `${level.title} 回家複習`);
+                                setAssignmentName(assignment.title || `${level.bookLevel} ${level.unit} ${level.title} 回家複習`);
                                 setHint(`已選擇 ${level.bookLevel} ${level.unit}，可以開始練習。`);
                               }}
                             >
