@@ -204,12 +204,13 @@ export default function App() {
   const [voiceMode, setVoiceMode] = React.useState('slow');
   const [speechMessage, setSpeechMessage] = React.useState('點擊喇叭播放英文單字');
   const [assignmentRecords, setAssignmentRecords] = React.useState([]);
+  const [activeAssignments, setActiveAssignments] = React.useState([]);
   const [currentAssignmentId, setCurrentAssignmentId] = React.useState('');
   const [currentRunId, setCurrentRunId] = React.useState('');
   const [totalWrongCount, setTotalWrongCount] = React.useState(0);
   const [recordsMessage, setRecordsMessage] = React.useState('老師後台紀錄會從 Supabase 讀取。');
   const [assignmentName, setAssignmentName] = React.useState('Level 4 Unit 1 回家複習');
-  const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來建立回家作業。');
+  const [assignmentMessage, setAssignmentMessage] = React.useState('老師可以先選 Level，再選 Unit 與班級來指派回家作業。');
   const [assignmentLink, setAssignmentLink] = React.useState('');
   const [assignmentShareText, setAssignmentShareText] = React.useState('');
   const [appMode, setAppMode] = React.useState('student');
@@ -227,18 +228,23 @@ export default function App() {
     }
 
     setLoading(true);
-    const [classResult, studentResult, unitResult, wordResult, runResult] = await Promise.all([
+    const [classResult, studentResult, unitResult, wordResult, assignmentResult, runResult] = await Promise.all([
       supabase.from('classes').select('*').order('name'),
       supabase.from('students').select('*').order('name'),
       supabase.from('vocab_units').select('*').order('book_level').order('unit_name'),
       supabase.from('vocab_words').select('*').order('sort_order'),
+      supabase
+        .from('assignments')
+        .select('id, title, class_id, unit_id, is_active, created_at, vocab_units(id, title, unit_name, book_level)')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false }),
       supabase
         .from('assignment_runs')
         .select('id, assignment_id, student_id, score, total_words, completed_words, wrong_count, started_at, completed_at, status, assignments(id, title, class_id, unit_id, classes(name), vocab_units(title, unit_name)), students(id, name, class_id)')
         .order('started_at', { ascending: false }),
     ]);
 
-    const error = classResult.error || studentResult.error || unitResult.error || wordResult.error || runResult.error;
+    const error = classResult.error || studentResult.error || unitResult.error || wordResult.error || assignmentResult.error || runResult.error;
     if (error) {
       setDataMessage(`Supabase 讀取失敗：${error.message}`);
       setLoading(false);
@@ -254,9 +260,11 @@ export default function App() {
 
     if (transformed.classes.length) setClasses(transformed.classes);
     if (transformed.levels.length) setLevels(transformed.levels);
+    const assignments = assignmentResult.data || [];
+    setActiveAssignments(assignments);
     const records = transformAssignmentRuns(runResult.data || []);
     setAssignmentRecords(records);
-    setRecordsMessage(`已同步資料 ${records.length} 筆學生作業統計紀錄。`);
+    setRecordsMessage(`已同步資料 ${records.length} 筆學生作業統計紀錄，${assignments.length} 筆目前指派作業。`);
     setDataMessage(`已同步資料 ${transformed.classes.length} 個班級、${studentResult.data?.length || 0} 位學生、${transformed.levels.length} 個 Unit、${wordResult.data?.length || 0} 個單字。`);
     setLoading(false);
   }
@@ -290,6 +298,22 @@ export default function App() {
   const selectedClass = classes.find((c) => c.id === selectedClassId) || classes[0] || FALLBACK_CLASSES[0];
   const manageClass = classes.find((c) => c.id === manageClassId) || classes[0] || FALLBACK_CLASSES[0];
   const studentClass = classes.find((c) => c.id === studentClassId) || classes[0] || FALLBACK_CLASSES[0];
+  const studentAssignedAssignments = React.useMemo(
+    () => activeAssignments.filter((assignment) => assignment.class_id === studentClass.id),
+    [activeAssignments, studentClass.id]
+  );
+  const studentAssignedHomeworkOptions = React.useMemo(
+    () => studentAssignedAssignments
+      .map((assignment) => ({
+        assignment,
+        level: levels.find((level) => level.id === assignment.unit_id),
+      }))
+      .filter((item) => item.level),
+    [studentAssignedAssignments, levels]
+  );
+  const studentAssignedAssignment = studentAssignedHomeworkOptions.find((item) => item.level.id === selectedLevelId)?.assignment || studentAssignedHomeworkOptions[0]?.assignment || null;
+  const studentAssignedLevel = studentAssignedHomeworkOptions.find((item) => item.level.id === selectedLevelId)?.level || studentAssignedHomeworkOptions[0]?.level || null;
+  const hasStudentAssignedHomework = studentAssignedHomeworkOptions.length > 0;
   const currentWord = wordOrder[currentIndex] || selectedLevel.words?.[0] || FALLBACK_LEVELS[0].words[0];
 
   React.useEffect(() => {
@@ -298,6 +322,19 @@ export default function App() {
     setAssignmentLink('');
     setAssignmentShareText('');
   }, [selectedClassId, selectedLevelId, studentName]);
+
+  React.useEffect(() => {
+    if ((appMode === 'teacher' && teacherUnlocked) || !studentAssignedHomeworkOptions.length) return;
+    const currentIsAssigned = studentAssignedHomeworkOptions.some((item) => item.level.id === selectedLevelId);
+    if (!currentIsAssigned) {
+      const firstHomework = studentAssignedHomeworkOptions[0];
+      setSelectedLevelId(firstHomework.level.id);
+      setSelectedBookLevel(firstHomework.level.bookLevel);
+      setAssignmentName(firstHomework.assignment?.title || `${firstHomework.level.title} 回家複習`);
+      setCurrentAssignmentId(firstHomework.assignment?.id || '');
+      setCurrentRunId('');
+    }
+  }, [studentAssignedHomeworkOptions.length, selectedLevelId, appMode, teacherUnlocked]);
 
   React.useEffect(() => {
     if (!selectedLevel?.words?.length) return;
@@ -458,6 +495,12 @@ export default function App() {
       return existing.id;
     }
 
+    if (!(appMode === 'teacher' && teacherUnlocked)) {
+      setRecordsMessage('目前這個班級沒有這個 Unit 的老師指派作業，學生不能自行建立其他 Unit 作業。');
+      setHint('目前沒有老師指派的作業，請先請老師建立作業。');
+      return '';
+    }
+
     const { data: created, error: createError } = await supabase
       .from('assignments')
       .insert({
@@ -571,12 +614,36 @@ export default function App() {
     setAssignmentShareText(shareText);
 
     if (supabase) {
-      const assignmentId = await ensureCurrentAssignment();
-      if (!assignmentId) {
-        setAssignmentMessage('建立作業失敗，請查看右側老師後台訊息。');
+      const existingAssignment = activeAssignments.find(
+        (assignment) => assignment.class_id === selectedClass.id && assignment.unit_id === selectedLevel.id && assignment.is_active
+      );
+
+      if (existingAssignment) {
+        setCurrentAssignmentId(existingAssignment.id);
+        setAssignmentMessage(`這份作業已經指派過：${selectedClass.name}｜${selectedLevel.bookLevel} ${selectedLevel.unit} ${selectedLevel.title}`);
         return;
       }
-      setAssignmentMessage(`✅ 已建立作業並寫入 Supabase：${assignmentName}｜班級：${selectedClass.name}｜範圍：${selectedLevel.title}`);
+
+      setCurrentAssignmentId('');
+      const { data: created, error: createError } = await supabase
+        .from('assignments')
+        .insert({
+          class_id: selectedClass.id,
+          unit_id: selectedLevel.id,
+          title: assignmentName || `${selectedLevel.title} 回家複習`,
+          is_active: true,
+        })
+        .select('id, title, class_id, unit_id, is_active, created_at, vocab_units(id, title, unit_name, book_level)')
+        .single();
+
+      if (createError) {
+        setAssignmentMessage(`建立作業失敗：${createError.message}`);
+        return;
+      }
+
+      setCurrentAssignmentId(created.id);
+      setActiveAssignments((previous) => [created, ...previous]);
+      setAssignmentMessage(`✅ 已新增指定作業給 ${selectedClass.name}：${selectedLevel.bookLevel} ${selectedLevel.unit} ${selectedLevel.title}。學生會在作業清單看到這一份。`);
       return;
     }
 
@@ -585,6 +652,7 @@ export default function App() {
 
   function speakWord(modeOverride = voiceMode) {
     if (!isLoggedIn) return setHint('請先登入學生姓名，才能播放聽力。');
+    if (!(appMode === 'teacher' && teacherUnlocked) && !hasStudentAssignedHomework) return setHint('目前沒有老師指派的作業，不能開始練習。');
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return setSpeechMessage('此瀏覽器不支援語音播放。');
     const playbackMode = modeOverride || voiceMode;
     const utterance = new window.SpeechSynthesisUtterance(currentWord.word);
@@ -896,13 +964,13 @@ export default function App() {
 
             <Card>
               <div className="card-body stack">
-                <h2>建立回家作業</h2>
+                <h2>指派回家作業</h2>
                 <input value={assignmentName} onChange={(e) => setAssignmentName(e.target.value)} />
                 <select value={selectedClass.id} onChange={(e) => setSelectedClassId(e.target.value)}>
                   {classes.map((c) => <option key={c.id} value={c.id}>{c.name}（{c.students.length} 位學生）</option>)}
                 </select>
-                <div className="notice">指派範圍：<strong>{selectedLevel.title}</strong><br />指派班級：<strong>{selectedClass.name}</strong></div>
-                <PrimaryButton onClick={createHomeworkAssignment}>建立這個 Unit 作業</PrimaryButton>
+                <div className="notice">指派範圍：<strong>{selectedLevel.bookLevel} {selectedLevel.unit}｜{selectedLevel.title}</strong><br />指派班級：<strong>{selectedClass.name}</strong><br /><small>可同時指派多個 Unit，學生只能從指定作業清單中選擇。</small></div>
+                <PrimaryButton onClick={createHomeworkAssignment}>指派這個 Unit 作業</PrimaryButton>
                 <div className="warning-box">{assignmentMessage}</div>
                 {assignmentLink && <div className="share-box"><strong>學生作業入口</strong><div className="link-box">{assignmentLink}</div><textarea readOnly value={assignmentShareText} rows={4} /></div>}
               </div>
@@ -915,19 +983,41 @@ export default function App() {
             {!(appMode === 'teacher' && teacherUnlocked) && (
               <Card>
                 <div className="card-body">
-                  <h2>選擇練習 Level / Unit</h2>
-                  <label>教材 Level</label>
-                  <select value={selectedBookLevel} onChange={(e) => changeBookLevel(e.target.value)}>
-                    {bookLevels.map((level) => <option key={level}>{level}</option>)}
-                  </select>
-                  <div className="student-unit-picker">
-                    {unitOptions.map((level) => (
-                      <button key={level.id} type="button" onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.title} 回家複習`); }} className={`unit-button ${selectedLevel.id === level.id ? 'active' : ''}`}>
-                        <div className="unit-number-badge">{level.unit}</div>
-                        <strong>{level.title}</strong>
-                        <span>{level.words.length} 個單字，全部必考</span>
-                      </button>
-                    ))}
+                  <h2>我的指定作業</h2>
+                  <div className={hasStudentAssignedHomework ? 'assigned-homework-card ready' : 'assigned-homework-card empty'}>
+                    {hasStudentAssignedHomework ? (
+                      <>
+                        <strong>{studentClass.name} 的指定作業清單</strong>
+                        <span>請選擇老師指派的作業開始練習，不能練習未指派的 Unit。</span>
+                        <div className="assigned-homework-list">
+                          {studentAssignedHomeworkOptions.map(({ assignment, level }) => (
+                            <button
+                              key={assignment.id}
+                              type="button"
+                              className={`assigned-homework-button ${selectedLevelId === level.id ? 'active' : ''}`}
+                              onClick={() => {
+                                setSelectedLevelId(level.id);
+                                setSelectedBookLevel(level.bookLevel);
+                                setCurrentAssignmentId(assignment.id);
+                                setCurrentRunId('');
+                                setAssignmentName(assignment.title || `${level.title} 回家複習`);
+                                setHint(`已選擇 ${level.bookLevel} ${level.unit}，請登入後開始練習。`);
+                              }}
+                            >
+                              <span className="unit-number-badge">{level.bookLevel} {level.unit}</span>
+                              <strong>{level.title}</strong>
+                              <small>{level.words.length} 個單字，全部必考</small>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <strong>目前沒有指定作業</strong>
+                        <span>{studentClass.name} 尚未有老師指派的 Level / Unit。</span>
+                        <small>請老師先進入後台建立作業，學生才可以開始練習。</small>
+                      </>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -936,14 +1026,24 @@ export default function App() {
               <div className="card-body">
                 <h2>學生登入作業</h2>
                 <div className="login-grid">
-                  <select value={studentClass.id} onChange={(e) => { setStudentClassId(e.target.value); setStudentName(''); setIsLoggedIn(false); }}>
+                  <select value={studentClass.id} onChange={(e) => { setStudentClassId(e.target.value); setStudentName(''); setIsLoggedIn(false); setCurrentRunId(''); setCurrentAssignmentId(''); }}>
                     {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                   <select value={studentName} onChange={(e) => { setStudentName(e.target.value); setIsLoggedIn(false); }}>
                     <option value="">請選擇姓名</option>
                     {studentClass.students.map((student) => <option key={student.id} value={student.name}>{student.name}</option>)}
                   </select>
-                  <PrimaryButton onClick={() => { if (studentName) { setIsLoggedIn(true); setSelectedClassId(studentClass.id); setHint(`歡迎 ${studentName}！請先聽一次發音。`); } }}>{isLoggedIn ? '已登入' : '登入開始作業'}</PrimaryButton>
+                  <PrimaryButton onClick={() => {
+                    if (!studentName) return setHint('請先選擇姓名。');
+                    if (!hasStudentAssignedHomework) return setHint('目前沒有老師指派的作業，請先請老師建立作業。');
+                    setIsLoggedIn(true);
+                    setSelectedClassId(studentClass.id);
+                    setSelectedLevelId(studentAssignedLevel.id);
+                    setSelectedBookLevel(studentAssignedLevel.bookLevel);
+                    setCurrentAssignmentId(studentAssignedAssignment.id);
+                    setAssignmentName(studentAssignedAssignment.title || `${studentAssignedLevel.title} 回家複習`);
+                    setHint(`歡迎 ${studentName}！這次指定作業是 ${studentAssignedLevel.bookLevel} ${studentAssignedLevel.unit}，請先聽一次發音。`);
+                  }}>{isLoggedIn ? '已登入' : '登入開始作業'}</PrimaryButton>
                 </div>
                 <div className="student-progress-panel">
                   <div className="student-progress-head">

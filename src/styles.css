@@ -239,3 +239,61 @@ textarea { resize: vertical; }
 @media (max-width: 520px) {
   .student-unit-picker { grid-template-columns: 1fr; }
 }
+
+.assigned-homework-card {
+  border: 2px solid rgba(252, 217, 131, .9);
+  border-radius: 22px;
+  padding: 18px;
+  background: linear-gradient(135deg, #eef4ff, #fff9ed);
+  display: grid;
+  gap: 8px;
+}
+.assigned-homework-card.ready {
+  border-color: #fcd983;
+}
+.assigned-homework-card.empty {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+.assigned-homework-card strong {
+  color: #2f4878;
+  font-size: 26px;
+  line-height: 1.15;
+}
+.assigned-homework-card span {
+  color: #476cb5;
+  font-weight: 900;
+}
+.assigned-homework-card small {
+  color: #6b7280;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.assigned-homework-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.assigned-homework-button {
+  text-align: left;
+  border: 2px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 12px;
+  background: white;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+}
+.assigned-homework-button.active {
+  border-color: #476cb5;
+  background: #eef4ff;
+}
+.assigned-homework-button strong {
+  font-size: 20px;
+  color: #2f4878;
+}
+.assigned-homework-button small {
+  color: #6b7280;
+  font-weight: 800;
+}
