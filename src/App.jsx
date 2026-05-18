@@ -980,51 +980,10 @@ export default function App() {
           )}
 
           <section className="game-column">
-            {!(appMode === 'teacher' && teacherUnlocked) && (
-              <Card>
-                <div className="card-body">
-                  <h2>我的指定作業</h2>
-                  <div className={hasStudentAssignedHomework ? 'assigned-homework-card ready' : 'assigned-homework-card empty'}>
-                    {hasStudentAssignedHomework ? (
-                      <>
-                        <strong>{studentClass.name} 的指定作業清單</strong>
-                        <span>請選擇老師指派的作業開始練習，不能練習未指派的 Unit。</span>
-                        <div className="assigned-homework-list">
-                          {studentAssignedHomeworkOptions.map(({ assignment, level }) => (
-                            <button
-                              key={assignment.id}
-                              type="button"
-                              className={`assigned-homework-button ${selectedLevelId === level.id ? 'active' : ''}`}
-                              onClick={() => {
-                                setSelectedLevelId(level.id);
-                                setSelectedBookLevel(level.bookLevel);
-                                setCurrentAssignmentId(assignment.id);
-                                setCurrentRunId('');
-                                setAssignmentName(assignment.title || `${level.title} 回家複習`);
-                                setHint(`已選擇 ${level.bookLevel} ${level.unit}，請登入後開始練習。`);
-                              }}
-                            >
-                              <span className="unit-number-badge">{level.bookLevel} {level.unit}</span>
-                              <strong>{level.title}</strong>
-                              <small>{level.words.length} 個單字，全部必考</small>
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <strong>目前沒有指定作業</strong>
-                        <span>{studentClass.name} 尚未有老師指派的 Level / Unit。</span>
-                        <small>請老師先進入後台建立作業，學生才可以開始練習。</small>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            )}
             <Card>
               <div className="card-body">
-                <h2>學生登入作業</h2>
+                <h2>學生登入</h2>
+                <p className="login-note">請先選擇班級與姓名，登入後才會顯示老師指派給你的作業清單。</p>
                 <div className="login-grid">
                   <select value={studentClass.id} onChange={(e) => { setStudentClassId(e.target.value); setStudentName(''); setIsLoggedIn(false); setCurrentRunId(''); setCurrentAssignmentId(''); }}>
                     {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -1068,8 +1027,51 @@ export default function App() {
               </div>
             </Card>
 
+            {!(appMode === 'teacher' && teacherUnlocked) && isLoggedIn && (
+              <Card>
+                <div className="card-body">
+                  <h2>我的指定作業</h2>
+                  <div className={hasStudentAssignedHomework ? 'assigned-homework-card ready' : 'assigned-homework-card empty'}>
+                    {hasStudentAssignedHomework ? (
+                      <>
+                        <strong>{studentName} 的指定作業清單</strong>
+                        <span>請選擇老師指派的作業開始練習，不能練習未指派的 Unit。</span>
+                        <div className="assigned-homework-list">
+                          {studentAssignedHomeworkOptions.map(({ assignment, level }) => (
+                            <button
+                              key={assignment.id}
+                              type="button"
+                              className={`assigned-homework-button ${selectedLevelId === level.id ? 'active' : ''}`}
+                              onClick={() => {
+                                setSelectedLevelId(level.id);
+                                setSelectedBookLevel(level.bookLevel);
+                                setCurrentAssignmentId(assignment.id);
+                                setCurrentRunId('');
+                                setAssignmentName(assignment.title || `${level.title} 回家複習`);
+                                setHint(`已選擇 ${level.bookLevel} ${level.unit}，可以開始練習。`);
+                              }}
+                            >
+                              <span className="assignment-level-chip">{level.bookLevel}｜{level.unit}</span>
+                              <strong>{level.title}</strong>
+                              <small>{level.words.length} 個單字，全部必考</small>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <strong>目前沒有指定作業</strong>
+                        <span>{studentClass.name} 尚未有老師指派的 Level / Unit。</span>
+                        <small>請老師先進入後台建立作業，學生才可以開始練習。</small>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            )}
+            {isLoggedIn && hasStudentAssignedHomework && (
             <Card className="game-card">
-              <div className="game-header"><div><span>目前練習題庫</span><h2>{selectedLevel.title}</h2><p>本次任務需要完成 Unit 所有單字</p></div><div className="score-grid"><strong>{score}</strong><span>分數</span><strong>{streak}</strong><span>連勝</span><strong>{totalWrongCount}</strong><span>總錯誤</span></div></div>
+              <div className="game-header"><div><span>目前練習題庫</span><h2>{selectedLevel.bookLevel} {selectedLevel.unit}｜{selectedLevel.title}</h2><p>本次任務需要完成 Unit 所有單字</p></div><div className="score-grid"><strong>{score}</strong><span>分數</span><strong>{streak}</strong><span>連勝</span><strong>{totalWrongCount}</strong><span>總錯誤</span></div></div>
               <div className="game-body">
                 <div className="progress-row"><span>學習進度</span><span>第 {currentIndex + 1} 題 / 共 {wordOrder.length} 題｜已完成 {completedCount} 題｜剩餘 {remainingCount} 題</span></div>
                 <div className="progress-bar"><div style={{ width: `${wordOrder.length ? (completedCount / wordOrder.length) * 100 : 0}%` }} /></div>
@@ -1081,6 +1083,7 @@ export default function App() {
                 {isUnitComplete && <div className="complete-box"><h3>🎉 Unit 完成！</h3><p>{studentName || '學生'} 已完成 {selectedLevel.title} 的全部 {wordOrder.length} 個單字。</p><p>本次分數：{score}｜總錯誤：{totalWrongCount}</p><p className="record-note">{recordsMessage}</p><PrimaryButton onClick={startNewFullUnitRun}>重新開始完整 Unit 任務</PrimaryButton></div>}
               </div>
             </Card>
+            )}
           </section>
 
           {(appMode === 'teacher' && teacherUnlocked) && (

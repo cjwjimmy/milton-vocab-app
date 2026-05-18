@@ -297,3 +297,23 @@ textarea { resize: vertical; }
   color: #6b7280;
   font-weight: 800;
 }
+
+.assignment-level-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 150px;
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: #476cb5;
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+.login-note {
+  margin-top: -6px;
+  color: #476cb5;
+  font-weight: 800;
+  line-height: 1.5;
+}
