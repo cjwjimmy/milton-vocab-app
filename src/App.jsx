@@ -575,7 +575,7 @@ export default function App() {
       return setTimeout(() => inputRef.current?.focus(), 120);
     }
     if (currentWord.acceptedAnswers.includes(normalized)) {
-      const addedScore = Math.max(40, 100 - wrongCount * 20);
+      const addedScore = 10;
       const partialScore = score + addedScore;
       setScore(partialScore);
       setStreak((value) => value + 1);
@@ -785,7 +785,30 @@ export default function App() {
           </section>
 
           <aside className="side-column">
-            <Card><div className="card-body"><h2>{selectedClass.name} 老師後台紀錄</h2><div className="notice">{recordsMessage}</div><div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>完成紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div><div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前這個班級還沒有作業紀錄。</div>}{visibleAssignmentRecords.map((record) => <div key={record.id} className="record-card"><strong>{record.studentName}</strong><b>{record.score} 分</b><span>{record.unitTitle}</span><small>練習次數：{record.attempts}｜最近完成：{record.completedAt}</small><small>最近分數：{record.latestScore ?? record.score}｜錯誤：{record.wrongCount ?? 0}</small></div>)}</div></div></Card>
+            <Card><div className="card-body"><h2>{selectedClass.name} 老師後台紀錄</h2><div className="notice">{recordsMessage}</div><div className="stats-grid"><div><strong>{visibleAssignmentRecords.length}</strong><span>學生紀錄</span></div><div><strong>{averageScore}</strong><span>平均分數</span></div></div><div className="records-list">{visibleAssignmentRecords.length === 0 && <div className="notice">目前這個班級還沒有作業紀錄。</div>}{visibleAssignmentRecords.map((record) => {
+  const progressPercent = record.totalWords ? Math.round((record.completedWords / record.totalWords) * 100) : 0;
+  const statusClass = record.status === '已完成' ? 'status-complete' : 'status-progress';
+  return (
+    <div key={record.id} className="record-card">
+      <div className="record-topline">
+        <strong>{record.studentName}</strong>
+        <span className={`status-pill ${statusClass}`}>{record.status}</span>
+      </div>
+      <div className="record-score-row">
+        <b>{record.score} 分</b>
+        <small>每答對 1 題 +10 分</small>
+      </div>
+      <span className="record-unit">練習 Unit：{record.unitTitle}</span>
+      <div className="record-progress-line">
+        <span>Unit 進度：{record.completedWords}/{record.totalWords} 題</span>
+        <span>{progressPercent}%</span>
+      </div>
+      <div className="mini-progress"><i style={{ width: `${progressPercent}%` }} /></div>
+      <small>練習次數：{record.attempts}｜最近分數：{record.latestScore ?? record.score}｜錯誤：{record.wrongCount ?? 0}</small>
+      <small>{record.status === '已完成' ? '最近完成' : '最近練習'}：{record.completedAt || '尚未完成'}</small>
+    </div>
+  );
+})}</div></div></Card>
           </aside>
         </main>
       </div>
