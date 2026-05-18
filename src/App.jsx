@@ -781,6 +781,7 @@ export default function App() {
                 <div className="unit-list">
                   {unitOptions.map((level) => (
                     <button key={level.id} type="button" onClick={() => { setSelectedLevelId(level.id); setAssignmentName(`${level.title} 回家複習`); }} className={`unit-button ${selectedLevel.id === level.id ? 'active' : ''}`}>
+                      <div className="unit-number-badge">{level.unit}</div>
                       <strong>{level.title}</strong>
                       <span>完整單字庫：{level.words.length} 個單字，全部必考</span>
                     </button>

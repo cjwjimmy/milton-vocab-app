@@ -169,3 +169,22 @@ textarea { resize: vertical; }
   box-shadow: 0 10px 20px rgba(71,108,181,.18);
 }
 .resume-button:active { transform: scale(.98); }
+
+.unit-number-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: #476cb5;
+  color: white;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+.unit-button.active .unit-number-badge {
+  background: #fcd983;
+  color: #2f4878;
+}
