@@ -514,7 +514,7 @@ export default function App() {
     return run.id;
   }
 
-  async function recordQuestionProgress({ nextCompletedIds, partialScore, isComplete }) {
+  async function recordQuestionProgress({ nextCompletedIds, partialScore, isComplete, wrongTotal = totalWrongCount, submittedAnswer = currentWord.word, isCorrect = true }) {
     if (!supabase) return;
 
     const selectedStudent = studentClass.students.find((student) => student.name === studentName);
@@ -531,7 +531,7 @@ export default function App() {
       score: partialScore,
       total_words: wordOrder.length,
       completed_words: completedWords,
-      wrong_count: totalWrongCount,
+      wrong_count: wrongTotal,
       status: isComplete ? 'completed' : 'in_progress',
       completed_at: isComplete ? new Date().toISOString() : null,
     };
@@ -549,8 +549,8 @@ export default function App() {
     await supabase.from('word_attempts').insert({
       run_id: runId,
       word_id: currentWord.id,
-      submitted_answer: currentWord.word,
-      is_correct: true,
+      submitted_answer: submittedAnswer,
+      is_correct: isCorrect,
       attempt_number: wrongCount + 1,
     });
 
@@ -644,6 +644,41 @@ export default function App() {
     setTimeout(() => inputRef.current?.focus(), 120);
   }
 
+  async function recordWrongAnswerProgress({ nextScore, nextWrongTotal, submittedAnswer }) {
+    if (!supabase || !isLoggedIn) return;
+
+    const runId = await ensureCurrentRun();
+    if (!runId) return;
+
+    const { error: updateError } = await supabase
+      .from('assignment_runs')
+      .update({
+        score: nextScore,
+        total_words: wordOrder.length,
+        completed_words: completedWordIds.length,
+        wrong_count: nextWrongTotal,
+        status: 'in_progress',
+        completed_at: null,
+      })
+      .eq('id', runId);
+
+    if (updateError) {
+      setRecordsMessage(`寫入錯誤扣分失敗：${updateError.message}`);
+      return;
+    }
+
+    await supabase.from('word_attempts').insert({
+      run_id: runId,
+      word_id: currentWord.id,
+      submitted_answer: submittedAnswer,
+      is_correct: false,
+      attempt_number: wrongCount + 1,
+    });
+
+    setRecordsMessage(`已記錄錯誤並扣 5 分。目前進度：${completedWordIds.length}/${wordOrder.length} 題。`);
+    await loadAssignmentRecords();
+  }
+
   function checkAnswer(event) {
     event.preventDefault();
     if (!isLoggedIn) return setHint('請先登入學生姓名，才能送出答案。');
@@ -665,7 +700,7 @@ export default function App() {
       setCompletedWordIds((previous) => {
         const nextCompleted = previous.includes(currentWord.id) ? previous : [...previous, currentWord.id];
         const isComplete = nextCompleted.length >= wordOrder.length;
-        recordQuestionProgress({ nextCompletedIds: nextCompleted, partialScore, isComplete });
+        recordQuestionProgress({ nextCompletedIds: nextCompleted, partialScore, isComplete, wrongTotal: totalWrongCount, submittedAnswer: currentWord.word, isCorrect: true });
         if (isComplete) {
           setIsUnitComplete(true);
           setHint('🎉 太棒了！你已完成這個 Unit 的所有單字！');
@@ -677,12 +712,16 @@ export default function App() {
       return;
     }
     const feedback = getSpellingFeedback(answer, currentWord.word);
+    const nextWrongTotal = totalWrongCount + 1;
+    const nextScore = Math.max(0, score - 5);
     setWrongCount((value) => value + 1);
-    setTotalWrongCount((value) => value + 1);
+    setTotalWrongCount(nextWrongTotal);
+    setScore(nextScore);
     setStreak(0);
     setWrongReview({ submittedAnswer: answer, feedback });
+    recordWrongAnswerProgress({ nextScore, nextWrongTotal, submittedAnswer: answer });
     setAnswer('');
-    setHint('請重新聽一次，然後再拼同一個單字。');
+    setHint('答錯扣 5 分。請重新聽一次，然後再拼同一個單字。');
     setTimeout(() => inputRef.current?.focus(), 120);
   }
 
@@ -707,7 +746,7 @@ export default function App() {
         score: finalScore,
         total_words: wordOrder.length,
         completed_words: wordOrder.length,
-        wrong_count: totalWrongCount,
+        wrong_count: wrongTotal,
         completed_at: new Date().toISOString(),
         status: 'completed',
       });
@@ -916,7 +955,7 @@ export default function App() {
                     <div><small>練習 Unit</small><b>{selectedLevel.unit}</b></div>
                     <div><small>完成進度</small><b>{studentCompletedWords}/{studentTotalWords} 題</b></div>
                     <div><small>目前分數</small><b>{score} 分</b></div>
-                    <div><small>計分方式</small><b>答對 1 題 +10</b></div>
+                    <div><small>計分方式</small><b>答對 +10｜答錯 -5</b></div>
                   </div>
                   <div className="record-progress-line"><span>我的 Unit 進度</span><span>{studentProgressPercent}%</span></div>
                   <div className="mini-progress"><i style={{ width: `${studentProgressPercent}%` }} /></div>
@@ -958,7 +997,7 @@ export default function App() {
       </div>
       <div className="record-score-row">
         <b>{record.score} 分</b>
-        <small>每答對 1 題 +10 分</small>
+        <small>答對 +10｜答錯 -5</small>
       </div>
       <span className="record-unit">練習 Unit：{record.unitName || record.unitTitle}</span>
       <div className="record-progress-line">
