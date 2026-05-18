@@ -694,11 +694,13 @@ export default function App() {
     const playbackMode = modeOverride || voiceMode;
     const utterance = new window.SpeechSynthesisUtterance(currentWord.word);
     utterance.lang = 'en-US';
-    utterance.rate = playbackMode === 'slow' ? 0.62 : 0.92;
+    // 國小一年級適用：整體放慢語速，讓孩子可以聽清楚每個音節
+    // 超慢清楚：0.48，自然播放：0.68
+    utterance.rate = playbackMode === 'slow' ? 0.48 : 0.68;
     utterance.pitch = 1;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
-    setSpeechMessage(playbackMode === 'slow' ? '正在以慢速清楚播放，請仔細聽...' : '正在以自然語速播放，請仔細聽...');
+    setSpeechMessage(playbackMode === 'slow' ? '正在以超慢清楚播放，請仔細聽...' : '正在以較慢語速播放，請仔細聽...');
     setTimeout(() => inputRef.current?.focus(), 200);
   }
 
@@ -1134,7 +1136,7 @@ export default function App() {
               <div className="game-body">
                 <div className="progress-row"><span>學習進度</span><span>第 {currentIndex + 1} 題 / 共 {wordOrder.length} 題｜已完成 {completedCount} 題｜剩餘 {remainingCount} 題</span></div>
                 <div className="progress-bar"><div style={{ width: `${wordOrder.length ? (completedCount / wordOrder.length) * 100 : 0}%` }} /></div>
-                <div className="listening-panel"><img src={BRAND.iconLogoYellow} alt="Milton icon" /><h3>先聽，再拼字</h3><p>畫面不會顯示答案，請仔細聽發音。</p><button type="button" disabled={!isLoggedIn} onClick={() => speakWord(voiceMode)} className="listen-button">🔊</button><small>{speechMessage}</small><div className="voice-toggle"><button type="button" onClick={() => { setVoiceMode('slow'); speakWord('slow'); }} className={voiceMode === 'slow' ? 'active' : ''}>慢速清楚</button><button type="button" onClick={() => { setVoiceMode('native'); speakWord('native'); }} className={voiceMode === 'native' ? 'active' : ''}>自然語速</button></div></div>
+                <div className="listening-panel"><img src={BRAND.iconLogoYellow} alt="Milton icon" /><h3>先聽，再拼字</h3><p>畫面不會顯示答案，請仔細聽發音。</p><button type="button" disabled={!isLoggedIn} onClick={() => speakWord(voiceMode)} className="listen-button">🔊</button><small>{speechMessage}</small><div className="voice-toggle"><button type="button" onClick={() => { setVoiceMode('slow'); speakWord('slow'); }} className={voiceMode === 'slow' ? 'active' : ''}>超慢清楚</button><button type="button" onClick={() => { setVoiceMode('native'); speakWord('native'); }} className={voiceMode === 'native' ? 'active' : ''}>較慢語速</button></div></div>
                 <form onSubmit={checkAnswer} className="answer-card"><label>✏️ 請拼出你聽到的英文單字</label><input ref={inputRef} value={answer} disabled={showResult} onChange={(e) => setAnswer(e.target.value)} autoCapitalize="none" spellCheck="false" placeholder="Type the word here..." />
                   <div className="letter-hint"><span>字母提示</span>{wrongReview && !showResult ? <div className="feedback-letters">{wrongReview.feedback.map((item) => <b key={item.index} className={item.status === 'correct' ? 'correct' : 'wrong'}>{item.typedChar || '_'}</b>)}</div> : <div className="masked-word">{maskedWord}</div>}</div>
                   <div className="hint-box">{hint}</div><div className="button-row">{!showResult && <PrimaryButton type="submit">送出答案</PrimaryButton>}<button type="button" onClick={speakWord} className="secondary-button">再聽一次</button></div></form>
